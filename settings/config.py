@@ -5,15 +5,10 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 BUFFER_DIR = BASE_DIR / 'infrastructure/folders/buffer'
-NETWORK_DISK = BASE_DIR / 'infrastructure/folders/network_disk'
+NETWORK_DISK = Path('Z:\Робот')
 LOG_FILE = BASE_DIR / 'settings/robot.log'
 
 ENV = os.path.join(os.path.dirname(__file__), ".env")
-
-
-# Telegram
-class Telegram(BaseModel):
-    token: str
 
 
 # Ebay
@@ -68,7 +63,6 @@ class Settings(BaseSettings):
     sysdata: SysData
     huaweidata: HuaweiData
     ebay: Ebay
-    telegram: Telegram
 
     class Config:
         env_nested_delimiter = '__'

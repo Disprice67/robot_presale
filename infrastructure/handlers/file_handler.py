@@ -12,6 +12,7 @@ class FileEventHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         path_name = Path(event.src_path).name
+        print(event.src_path)
         if not event.is_directory and path_name.endswith(('.xlsx',)) and '~$' not in path_name:
             self.database_repository.update_table(event)
             self.robot_logger.info(f'Директория обновлена {event.src_path}')
@@ -22,13 +23,16 @@ class MonitorFiles(IMonitorFiles):
         self.robot_logger = robot_logger
 
     def start_monitoring(self, directory_paths: list[str]):
-        observers = []
-
-        for path in directory_paths:
-            event_handler = FileEventHandler(self.database_repository, self.robot_logger)
-            observer = Observer()
-            observer.schedule(event_handler, path=path, recursive=True)
-            observer.start()
-            observers.append(observer)
-        self.robot_logger.success('Мониторинг сетевых папок запущен.')
-        return observers
+        try:
+            observers = []
+            for path in directory_paths:
+                event_handler = FileEventHandler(self.database_repository, self.robot_logger)
+                observer = Observer()
+                observer.schedule(event_handler, path=path, recursive=True)
+                observer.start()
+                observers.append(observer)
+                self.robot_logger.info(f'Директория {path} мониторится.')
+            self.robot_logger.success('Мониторинг сетевых папок запущен.')
+            return observers
+        except Exception as e:
+            self.robot_logger.error(f'Ошибка при мониторинге сетевых папок {e}')
