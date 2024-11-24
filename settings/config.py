@@ -5,7 +5,7 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 BUFFER_DIR = BASE_DIR / 'infrastructure/folders/buffer'
-NETWORK_DISK = Path('Z:\Робот')
+NETWORK_DISK = BASE_DIR / 'infrastructure/folders/network_disk'
 LOG_FILE = BASE_DIR / 'settings/robot.log'
 
 ENV = os.path.join(os.path.dirname(__file__), ".env")
