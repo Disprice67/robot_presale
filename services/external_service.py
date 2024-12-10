@@ -16,7 +16,10 @@ class EmailService:
         self.email = email
 
     def get_file_list(self) -> list[Path]:
-        return self.email.file_list
+        return self.email.get_file_list()
+
+    def clear_file_list(self) -> None:
+        self.email.clear_file_list()
 
     def download_attachments(self,) -> bool:
         return self.email.download_attachments()

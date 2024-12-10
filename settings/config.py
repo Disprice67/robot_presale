@@ -11,6 +11,12 @@ LOG_FILE = BASE_DIR / 'settings/robot.log'
 ENV = os.path.join(os.path.dirname(__file__), ".env")
 
 
+# Redis
+class RedisSettings(BaseModel):
+    redis_url: str
+    redis_port: str
+
+
 # Ebay
 class Ebay(BaseModel):
     api_key: str
@@ -63,6 +69,7 @@ class Settings(BaseSettings):
     sysdata: SysData
     huaweidata: HuaweiData
     ebay: Ebay
+    redis_settings: RedisSettings
 
     class Config:
         env_nested_delimiter = '__'

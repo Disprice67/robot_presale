@@ -56,7 +56,7 @@ class EbayCom(IEbay):
             api = self._get_finding_api()
             response = api.execute('findItemsAdvanced', payload)
             search_count = response.reply.searchResult._count
-            if search_count == 0:
+            if search_count == "0":
                 self.robot_logger.info(f"По запросу {payload['keywords']} ничего не найдено.")
                 return None
             self.robot_logger.success(f"Найдено {search_count} позиций для {payload['keywords']}.")
@@ -71,6 +71,9 @@ class EbayCom(IEbay):
             api = self._get_trading_api()
             response = api.execute('GetItem', {'ItemID': item_id, 'IncludeItemSpecifics': True})
             specifics = response.reply.Item.ItemSpecifics.NameValueList
+            if not isinstance(specifics, list):
+                self.robot_logger.info(f"{specifics} нет расширенных параметров, прекращаем поиск.")
+                return False
             for specific in specifics:
                 if specific.Name in ('Model', 'MPN'):
                     filtered_value = ifilter.filter(specific.Value)

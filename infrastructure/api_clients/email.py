@@ -31,17 +31,23 @@ class Email(IEmail):
     def get_file_list(self) -> list[Path]:
         return self.file_list
 
+    def clear_file_list(self) -> None:
+        self.file_list.clear()
+
     def download_attachments(self,) -> bool:
         """Сохраняет вложения из входящих писем в указанный каталог."""
         try:
             for item in self.account.inbox.all():
-                self.sender = item.sender.email_address
+                if item.sender.email_address not in self.recipients:
+                    self.recipients.append(item.sender.email_address)
                 self.subject = item.subject
 
                 for attachment in item.attachments:
+                    if attachment.name[attachment.name.rfind('.') - 1] in ('D', 'Y'):
+                        item.delete()
+                        return False
                     if isinstance(attachment, FileAttachment) and attachment.name.endswith('.xlsx'):
                         self.robot_logger.info(f'Найден excel в письме {attachment.name}.')
-                        # Проверяет ли он то что это действительно файл xlsx, а не любой файл в расширением xlsx 
                         path = self.buffer_in / attachment.name
                         with open(path, 'wb') as f:
                             f.write(attachment.content)
@@ -50,7 +56,6 @@ class Email(IEmail):
                 if self.file_list:
                     item.delete()
                     return True
-                #сделать чтобы письма куда-то уходили или сохранялись
                 item.delete()
         except Exception as e:
             self.robot_logger.error(f"Ошибка при обработке писем: {e}")

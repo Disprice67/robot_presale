@@ -56,7 +56,7 @@ class AbstractQuaryORM:
                     obj_table.part_number.like(f"%{part_number}%"),
                     case(
                         (obj_table == aliased(ArchiveBook), getattr(obj_table, 'zip_values', None)),
-                        else_='p/n совпал без букв - ' + obj_table.part_number
+                        else_=obj_table.part_number
                     )
                 ),
                 else_=None
@@ -64,7 +64,9 @@ class AbstractQuaryORM:
         )
         result = session.execute(quary_in).first()
         if result:
-            return result._asdict()
+            result_dict = result._asdict()
+            result_dict['match_type'] = 'partial'
+            return result_dict
 
         quary_out = quary.filter(func.instr(part_number, obj_table.part_number))
         quary_out = quary_out.add_columns(
@@ -73,7 +75,7 @@ class AbstractQuaryORM:
                     func.instr(part_number, obj_table.part_number) > 0,
                     case(
                         (obj_table == aliased(ArchiveBook), getattr(obj_table, 'zip_values', None)),
-                        else_='p/n совпал без букв - ' + obj_table.part_number
+                        else_=obj_table.part_number
                     )
                 ),
                 else_=None
@@ -81,7 +83,9 @@ class AbstractQuaryORM:
         )
         result = session.execute(quary_out).first()
         if result:
-            return result._asdict()
+            result_dict = result._asdict()
+            result_dict['match_type'] = 'partial'
+            return result_dict
         return None
 
     @staticmethod
@@ -210,7 +214,7 @@ class ArchiveBookRepository(AbstractQuaryORM):
         s = aliased(Status)
         quary = select(
             func.sum(a.amount).label('QTY ИЗ АРХИВОВ'),
-            a.project_code.label('№ ПОСЛЕДНЕГО ЗАПРОСА ИЗ АРХИВА'),
+            a.project_code.label('№ ЗАПРОСА'),
         ).select_from(
             a
         ).join(
@@ -276,9 +280,16 @@ class ChassisRepository:
         ).select_from(
             c
         ).filter(func.instr(c.part_number, key) == 1)
+        print(key)
         result = session.execute(quary).first()
         if result:
-            return result._asdict()
+            part_bp = result.power_unit
+            part_fan = result.fan_unit
+            comment = result.comment
+
+            return {
+                'ШАССИ': f"Шасси! БП - {part_bp}, FAN - {part_fan}, Комментарий - {comment}"
+            }
 
 
 class ORMQuary(IORMQuary):
@@ -296,53 +307,61 @@ class ORMQuary(IORMQuary):
             return None
 
     def directory_books_query(self, item: dict, keys: list) -> None:
-        """directory_books_query."""
-        # get_codebook
+        """Основной процесс поиска данных и обновления элемента."""
         self.robot_logger.debug(f'Процесс поиска по directory_books {keys[0]}')
-        quary_result = self._execute_repository_query(
+
+        quary_result = self._find_primary_data(keys)
+        if quary_result:
+            quary_result = self._merge_archive_data(quary_result, keys[0])
+        else:
+            quary_result = self._find_archive_data(keys)
+
+        quary_result = self._merge_chassis_data(quary_result, keys[0])
+
+        if quary_result:
+            self._log_and_update_item(item, quary_result)
+
+    def _find_primary_data(self, keys: list):
+        """Поиск данных в основных репозиториях."""
+        repositories = [
             CodeBookRepository.get_items_by_keys,
-            keys
-        )
-        if not quary_result:
-            # get_purchase_buy
-            quary_result = self._execute_repository_query(
-                PurchaseBuyRepository.get_items_by_keys,
-                keys
-            )
+            PurchaseBuyRepository.get_items_by_keys,
+            PurchaseWantRepository.get_items_by_keys
+        ]
+        for repo_method in repositories:
+            result = self._execute_repository_query(repo_method, keys)
+            if result:
+                return result
+        return None
 
-        if not quary_result:
-            # get_purchase_want
-            quary_result = self._execute_repository_query(
-                PurchaseWantRepository.get_items_by_keys,
-                keys
-            )
+    def _merge_archive_data(self, quary_result: dict, key: str) -> dict:
+        """Объединяет результаты с данными из архива."""
+        qty_result = self._execute_repository_query(ArchiveBookRepository.select_qty, key)
+        if qty_result:
+            quary_result.update(qty_result)
+        return quary_result
 
-        if quary_result:
-            # get_qty_in_arhive
-            qty_result = self._execute_repository_query(
-                ArchiveBookRepository.select_qty, keys[0]
-            )
-            if qty_result:
-                quary_result.update(qty_result)
+    def _find_archive_data(self, keys: list):
+        """Поиск данных в архиве."""
+        return self._execute_repository_query(ArchiveBookRepository.get_items_by_keys, keys)
 
-        if not quary_result:
-            # get_archivebook
-            quary_result = self._execute_repository_query(
-                ArchiveBookRepository.get_items_by_keys,
-                keys
-            )
-
-        chassis_result = self._execute_repository_query(
-            ChassisRepository.get_items_by_keys, keys[0]
-        )
+    def _merge_chassis_data(self, quary_result: dict, key: str):
+        """Объединяет результаты с данными шасси."""
+        chassis_result = self._execute_repository_query(ChassisRepository.get_items_by_keys, key)
         if chassis_result:
-            quary_result.update(chassis_result)
+            if quary_result:
+                quary_result.update(chassis_result)
+            else:
+                quary_result = chassis_result
+        return quary_result
 
-        if quary_result:
-            zip_result = quary_result.get('ЗИП')
-            book_result = quary_result.get('Где нашли')
-            self.robot_logger.info(f'Нашли {zip_result} в {book_result}')
-            item.update(quary_result)
+    def _log_and_update_item(self, item: dict, quary_result: dict):
+        """Логирует результаты и обновляет элемент."""
+        zip_result = quary_result.get('ЗИП')
+        book_result = quary_result.get('Где нашли')
+        self.robot_logger.info(f'Нашли {zip_result} в {book_result}')
+        item.update(quary_result)
+
 
     def category_query(self, item: dict, key: str, comment: str):
         """category__query."""

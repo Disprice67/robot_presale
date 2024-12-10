@@ -11,6 +11,7 @@ from .api_clients.email import Email
 from .api_clients.huawei import ParsingHuawei
 
 from .logger.logger_conf import RobotLogger
+from .logger.redis_client import RedisClient
 
 from .database.settings.db_settings import SQLAlchemySettings
 
@@ -25,5 +26,6 @@ __all__ = [
     'ParsingHuawei',
     'ORMQuary',
     'ExcelHandler',
-    'RobotLogger'
+    'RobotLogger',
+    'RedisClient'
 ]

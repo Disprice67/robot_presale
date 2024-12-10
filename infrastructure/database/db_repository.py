@@ -26,7 +26,7 @@ class DatabaseRepository(IDatabaseRepository):
         inspector = inspect(self.engine)
         existing_tables = inspector.get_table_names()
         if existing_tables:
-            self.robot_logger.debug('База данных уже инициализирована.')
+            self.robot_logger.info('База данных уже инициализирована.')
             return True
         self.robot_logger.info("База данных не найдена. Создаем новую.")
         return False
@@ -89,7 +89,7 @@ class DatabaseRepository(IDatabaseRepository):
     def _get_data_exl(self, obj: Table, path: Path):
         try:
             col_lower = pd.read_excel(path, nrows=0).columns.tolist()
-            col_upper = [col.upper() for col in col_lower]
+            col_upper = [str(col).upper() for col in col_lower]
             if self._column_validate(obj, col_upper):
                 data = pd.read_excel(path, na_filter=False).to_dict('records')
                 return data

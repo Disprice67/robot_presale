@@ -10,6 +10,13 @@ class IEbay(Protocol):
 
 
 class IEmail(Protocol):
+
+    def get_file_list(self) -> list[Path]:
+        ...
+
+    def clear_file_list(self) -> None:
+        ...
+
     def download_attachments(self,) -> bool:
         ...
 

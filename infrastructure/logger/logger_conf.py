@@ -1,18 +1,21 @@
 import logging
 import asyncio
-from core import IRobotLogger
+from core import IRobotLogger, IRedisClient
 import colorlog
 import inspect
 from pathlib import Path
+import time
 
 
 class RobotLogger(IRobotLogger):
     SUCCESS_LEVEL = 25
 
-    def __init__(self, log_path: Path):
+    def __init__(self, log_path: Path, redis_client: IRedisClient = None, max_log_size: int = 1_000_000):
         self._logger = logging.getLogger("RobotLogger")
         self._logger.setLevel(logging.DEBUG)
+        self.max_log_size = max_log_size
         self.log_path = log_path
+        self.redis_client = redis_client
 
         logging.addLevelName(self.SUCCESS_LEVEL, "SUCCESS")
         self._logger.success = lambda message, *args, **kwargs: self._logger.log(self.SUCCESS_LEVEL, message, *args, **kwargs)
@@ -22,10 +25,12 @@ class RobotLogger(IRobotLogger):
 
     def _add_file_handler(self):
         """Добавляем обработчик для записи в файл (все логи)."""
-        file_handler = logging.FileHandler(self.log_path, encoding='utf-8')
+        file_handler = logging.FileHandler(self.log_path, mode='w', encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s")
+            "%(asctime)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+            )
         )
         self._logger.addHandler(file_handler)
 
@@ -35,6 +40,7 @@ class RobotLogger(IRobotLogger):
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(colorlog.ColoredFormatter(
             "%(asctime)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
             log_colors={
                 'DEBUG': 'cyan',
                 'INFO': 'green',
@@ -46,18 +52,10 @@ class RobotLogger(IRobotLogger):
         ))
         self._logger.addHandler(console_handler)
 
-    async def _send_to_telegram(self, message: str):
-        """Асинхронная отправка сообщения в Telegram."""
-        ...
-        # try:
-        #     await self.bot.send_message(self.chat_id, message, parse_mode=ParseMode.MARKDOWN)
-        # except Exception as e:
-        #     self._logger.error(f"Не удалось отправить лог в Telegram: {e}")
-
     def _log_and_notify(self, level: str, message: str):
         """Записываем в лог и отправляем уведомление в Telegram, если уровень ошибки или критичный."""
         frame = inspect.stack()[2]
-        caller_filename = frame.filename
+        caller_filename = Path(frame.filename).name
         caller_function = frame.function
         caller_line = frame.lineno
 
@@ -65,8 +63,38 @@ class RobotLogger(IRobotLogger):
 
         getattr(self._logger, level)(detailed_message)
 
-        # if level in ["error", "critical"]:
-        #     asyncio.create_task(self._send_to_telegram(f"*{level.upper()}*: {message}"))
+    def clear_log_file(self):
+        """Очистка содержимого лог-файла."""
+        with open(self.log_path, 'w', encoding='utf-8') as log_file:
+            log_file.truncate(0)
+
+    def _get_logs_from_file(self) -> str:
+        """Получение всех логов из файла."""
+        with open(self.log_path, 'r', encoding='utf-8') as log_file:
+            return log_file.read()
+
+    def _send_notification(self, type: str, file_path: Path = None):
+        """Отправляет уведомления в очередь."""
+        message = {
+            'type': type,
+            "log_file_path": str(self.log_path),
+        }
+        if file_path:
+            message['excel_file_path'] = str(file_path)
+            message['file_name'] = str(file_path.name)
+        self.redis_client.push_to_queue("logs_queue", message)
+
+    def verify_logs_and_alert(self, file_path: Path = None):
+        """Обработка и отправка уведомлений."""
+        logs = self._get_logs_from_file()
+        if "CRITICAL" in logs:
+            self._send_notification('CRITICAL')
+        elif "ERROR" in logs:
+            self._send_notification('ERROR', file_path)
+        else:
+            self._send_notification('SUCCESS', file_path)
+        time.sleep(3)
+        self.clear_log_file()
 
     def success(self, message: str):
         self._log_and_notify("success", message)

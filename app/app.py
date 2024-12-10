@@ -24,7 +24,7 @@ from infrastructure import (SQLAlchemySettings,
 from settings.config import Settings
 from pathlib import Path
 import os
-
+import time
 
 class AppCoordinator:
     def __init__(
@@ -53,6 +53,7 @@ class AppCoordinator:
         self._buffer_dir = buffer_dir
         self._network_disk_dir = network_disk_dir
         self._buffer_in = buffer_dir / 'in'
+        self._error_path = buffer_dir / 'error_file'
 
     @property
     def database_service(self,) -> DatabaseService:
@@ -210,19 +211,58 @@ class AppCoordinator:
                     )
         return data_generate_dict_list
 
-    def robot_process(self):
-        """Запуск работы робота."""
+    def _process_file(self, file_path):
+        """Обрабатываем один файл: извлекаем данные, записываем и отправляем email."""
+        try:
+            _input_data = self._handle_excel(file_path)
+            if not _input_data:
+                self._robot_logger.info(f"No data found in {file_path}")
+                return False
+
+            _data_collection = self._collection_data(_input_data)
+            for data in _data_collection:
+                if self.excel_handler_service.write_to_excel(data, file_path.name):
+                    self.email_service.send_email(
+                        self.excel_handler_service.get_output_file(file_path.name),
+                        data['sheet_name']
+                    )
+            return True
+        except Exception as e:
+            self._robot_logger.error(f"Error processing file {file_path}: {e}")
+            return False
+
+    def _process_email_batch(self):
+        """Обработка пакета email, включая загрузку и обработку файлов."""
+        if self.email_service.download_attachments():
+            self._robot_logger.info("Email batch processed successfully")
+            for file_path in self.email_service.get_file_list():
+                self._process_file(file_path)
+                self._robot_logger.verify_logs_and_alert(file_path)
+                time.sleep(3)
+                file_path.unlink()
+            self.email_service.clear_file_list()
+
+    def _monitor_and_process(self):
+        """Запуск мониторинга файлов и обработки email."""
         self._monitor_files()
         self.sys_handler_service.start_monitoring()
+        self._robot_logger.verify_logs_and_alert()
+
         while True:
-            if self.email_service.download_attachments():
-                for file_path in self.email_service.get_file_list():
-                    _input_data = self._handle_excel(file_path)
-                    if _input_data:
-                        _data_collection = self._collection_data(_input_data)
-                        for data in _data_collection:
-                            if self.excel_handler_service.write_to_excel(data, file_path.name):
-                                self.email_service.send_email(
-                                    self.excel_handler_service.get_output_file(file_path.name),
-                                    data['sheet_name']
-                                )
+            try:
+                self._process_email_batch()
+                time.sleep(10)
+            except Exception as e:
+                self._robot_logger.critical(f"Unexpected error: {e}")
+                self._robot_logger.verify_logs_and_alert()
+                time.sleep(10)
+
+    def robot_process(self):
+        """Запуск работы робота."""
+        try:
+            self._robot_logger.clear_log_file()
+            self._monitor_and_process()
+        except Exception as e:
+            self._robot_logger.critical(f"Fatal error in robot process: {e}")
+            self._robot_logger.verify_logs_and_alert()
+            time.sleep(100)
