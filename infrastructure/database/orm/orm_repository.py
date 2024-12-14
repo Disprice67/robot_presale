@@ -280,7 +280,6 @@ class ChassisRepository:
         ).select_from(
             c
         ).filter(func.instr(c.part_number, key) == 1)
-        print(key)
         result = session.execute(quary).first()
         if result:
             part_bp = result.power_unit
@@ -361,7 +360,6 @@ class ORMQuary(IORMQuary):
         book_result = quary_result.get('Где нашли')
         self.robot_logger.info(f'Нашли {zip_result} в {book_result}')
         item.update(quary_result)
-
 
     def category_query(self, item: dict, key: str, comment: str):
         """category__query."""
