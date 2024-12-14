@@ -15,6 +15,9 @@ class EmailService:
     def __init__(self, email: IEmail,):
         self.email = email
 
+    def remove_sender_email(self) -> None:
+        self.email.remove_sender_email()
+
     def get_file_list(self) -> list[Path]:
         return self.email.get_file_list()
 

@@ -34,12 +34,16 @@ class Email(IEmail):
     def clear_file_list(self) -> None:
         self.file_list.clear()
 
+    def remove_sender_email(self) -> None:
+        self.recipients.remove(self.sender)
+
     def download_attachments(self,) -> bool:
         """Сохраняет вложения из входящих писем в указанный каталог."""
         try:
             for item in self.account.inbox.all():
-                if item.sender.email_address not in self.recipients:
-                    self.recipients.append(item.sender.email_address)
+                self.sender = item.sender.email_address
+                if self.sender not in self.recipients:
+                    self.recipients.append(self.sender)
                 self.subject = item.subject
 
                 for attachment in item.attachments:

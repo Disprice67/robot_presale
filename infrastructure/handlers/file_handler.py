@@ -11,8 +11,8 @@ class FileEventHandler(FileSystemEventHandler):
         self.robot_logger = robot_logger
 
     def on_modified(self, event):
-        path_name = Path(event.src_path).name
-        if not event.is_directory and path_name.endswith(('.xlsx',)) and '~$' not in path_name:
+        path_name = Path(event.src_path)
+        if not event.is_directory and path_name.name.endswith(('.xlsx',)) and '~$' not in path_name.name:
             self.database_repository.update_table(event)
             self.robot_logger.info(f'Директория обновлена {event.src_path}')
 

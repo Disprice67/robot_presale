@@ -53,8 +53,11 @@ class ExcelHandler(IExcelHandler):
                         df_excel = pd.read_excel(excel_file, sheet, na_filter=False)
                         df_excel.columns = df_excel.columns.str.upper()
                         records = df_excel.to_dict('records')
-                        a_data = DataGenerate(input_data=records, sheet_name=sheet)
-                        list.append(mass, a_data)
+                        try:
+                            a_data = DataGenerate(input_data=records, sheet_name=sheet)
+                            mass.append(a_data)
+                        except Exception as e:
+                            self.robot_logger.error(f'Данные не верные на странице {sheet} в {file_path_in}')    
             return mass
         except Exception as e:
             self.robot_logger.error(f'Ошибка при обработке/чтение файла Input_Excel {e}')

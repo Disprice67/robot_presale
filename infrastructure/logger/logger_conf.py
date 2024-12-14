@@ -73,26 +73,31 @@ class RobotLogger(IRobotLogger):
         with open(self.log_path, 'r', encoding='utf-8') as log_file:
             return log_file.read()
 
-    def _send_notification(self, type: str, file_path: Path = None):
+    def _send_notification(self, type: str, log_file: bool = True, file_path: Path = None, excel_file: bool = True):
         """Отправляет уведомления в очередь."""
-        message = {
-            'type': type,
-            "log_file_path": str(self.log_path),
-        }
+        message = {'type': type}
+        if log_file:
+            message['log_file_path'] = log_file
+
         if file_path:
-            message['excel_file_path'] = str(file_path)
-            message['file_name'] = str(file_path.name)
+            message['file_name'] = file_path.name
+            if excel_file:
+                message['excel_file_path'] = file_path.name
+
         self.redis_client.push_to_queue("logs_queue", message)
 
     def verify_logs_and_alert(self, file_path: Path = None):
         """Обработка и отправка уведомлений."""
         logs = self._get_logs_from_file()
-        if "CRITICAL" in logs:
-            self._send_notification('CRITICAL')
-        elif "ERROR" in logs:
-            self._send_notification('ERROR', file_path)
-        else:
-            self._send_notification('SUCCESS', file_path)
+        notification_map = {
+            "CRITICAL": {"type": 'CRITICAL', "log_file": True, "excel_file": False},
+            "ERROR": {"type": 'ERROR', "log_file": True, "excel_file": True},
+            "SUCCESS": {"type": "SUCCESS", "log_file": True, "excel_file": False}
+        }
+        for log_type, params in notification_map.items():
+            if log_type in logs:
+                self._send_notification(**params, file_path=file_path)
+                break
         time.sleep(3)
         self.clear_log_file()
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ValidationError
 from typing import Optional, Union
 
 
@@ -48,15 +48,5 @@ class DataGenerate(BaseModel):
     def validate_input_data_before(cls, lists: list[dict]) -> Union[list, str]:
         input_fields = [value.alias for value in list(InputData.model_fields.values())]
         if len(set(lists[0]).intersection(input_fields)) != len(input_fields):
-            return f'Additional info: {MESSAGE_INFO[0]}'
+            raise ValidationError("Валидация не пройдена", cls)
         return lists
-
-    @field_validator('input_data', mode='after')
-    def validate_input_data_after(cls, data: Union[str, list[InputData]]) -> Union[str, list]:
-        if isinstance(data, list):
-            copy_data = data.copy()
-            for item in copy_data:
-                item_dict = item.dict(by_alias=True)
-                if 'Additional info' in item_dict['P/N'] or 'Additional info' in str(item_dict['КОЛИЧЕСТВО']):
-                    data.remove(item)
-        return data

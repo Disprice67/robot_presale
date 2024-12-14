@@ -1,4 +1,5 @@
 from typing import Protocol
+from pathlib import Path
 
 
 class IRedisClient(Protocol):
@@ -12,6 +13,10 @@ class IRedisClient(Protocol):
 
 
 class IRobotLogger(Protocol):
+
+    def verify_logs_and_alert(self, file_path: Path = None):
+        """Обработка и отправка уведомлений."""
+        ...
 
     def success(self, message: str):
         """Логирование уровня SUCCESS."""

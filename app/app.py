@@ -53,7 +53,6 @@ class AppCoordinator:
         self._buffer_dir = buffer_dir
         self._network_disk_dir = network_disk_dir
         self._buffer_in = buffer_dir / 'in'
-        self._error_path = buffer_dir / 'error_file'
 
     @property
     def database_service(self,) -> DatabaseService:
@@ -240,6 +239,7 @@ class AppCoordinator:
                 self._robot_logger.verify_logs_and_alert(file_path)
                 time.sleep(3)
                 file_path.unlink()
+            self.email_service.remove_sender_email()
             self.email_service.clear_file_list()
 
     def _monitor_and_process(self):
