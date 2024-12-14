@@ -10,11 +10,8 @@ LOG_FILE = BASE_DIR / 'settings/logs/robot.log'
 
 ENV = os.path.join(os.path.dirname(__file__), ".env")
 
-
-# Redis
-class RedisSettings(BaseModel):
-    redis_url: str
-    redis_port: str
+REDIS_HOST = os.getenv('REDIS_HOST', 'redis_app')
+REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
 
 
 # Ebay

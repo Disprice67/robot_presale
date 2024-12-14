@@ -1,4 +1,4 @@
-from settings import Settings, BASE_DIR, BUFFER_DIR, LOG_FILE, NETWORK_DISK
+from settings import Settings, BASE_DIR, BUFFER_DIR, LOG_FILE, NETWORK_DISK, REDIS_HOST, REDIS_PORT
 from app.app import AppCoordinator
 from infrastructure import SQLAlchemySettings, RobotLogger, RedisClient
 
@@ -8,7 +8,7 @@ if __name__ == '__main__':
     settings = Settings()
     sql_aclhemy_settings = SQLAlchemySettings(settings.alchemy_db.url_database)
     redis_client = RedisClient(
-        settings.redis_settings.redis_url, settings.redis_settings.redis_port
+        REDIS_HOST, REDIS_PORT
     )
     robot_logger = RobotLogger(LOG_FILE, redis_client)
 
