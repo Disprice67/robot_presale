@@ -7,10 +7,12 @@ if __name__ == '__main__':
     """Main driver."""
     settings = Settings()
     sql_aclhemy_settings = SQLAlchemySettings(settings.alchemy_db.url_database)
+    robot_logger = RobotLogger(LOG_FILE)
+
     redis_client = RedisClient(
-        REDIS_HOST, REDIS_PORT
+        REDIS_HOST, REDIS_PORT, robot_logger
     )
-    robot_logger = RobotLogger(LOG_FILE, redis_client)
+    robot_logger.redis_client = redis_client
 
     app_coordinator = AppCoordinator(
         settings,
