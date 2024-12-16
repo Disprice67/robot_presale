@@ -1,5 +1,5 @@
 from ..database.db_repository import DatabaseRepository
-from watchdog.observers.polling import PollingObserver
+from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from core import IMonitorFiles, IRobotLogger
 from pathlib import Path
@@ -27,7 +27,7 @@ class MonitorFiles(IMonitorFiles):
             observers = []
             for path in directory_paths:
                 event_handler = FileEventHandler(self.database_repository, self.robot_logger)
-                observer = PollingObserver()
+                observer = Observer()
                 observer.schedule(event_handler, path=path, recursive=True)
                 observer.start()
                 observers.append(observer)

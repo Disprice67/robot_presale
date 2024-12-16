@@ -75,8 +75,9 @@ class ExcelHandler(IExcelHandler):
             if key in columns:
                 col = columns[key]
                 ws_calculation.cell(row=row, column=col, value=value)
-                if 'MATCH_TYPE' in data:
-                    ws_calculation.cell(row=row, column=columns['ЗИП']).fill = self._cell_style_fill
+        if 'MATCH_TYPE' in data:
+            for match in data['MATCH_TYPE']:
+                ws_calculation.cell(row=row, column=columns[f'{match}']).fill = self._cell_style_fill
 
         for key, formula in self._formules.items():
             if key in columns:

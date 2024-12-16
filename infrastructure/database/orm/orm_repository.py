@@ -65,7 +65,7 @@ class AbstractQuaryORM:
         result = session.execute(quary_in).first()
         if result:
             result_dict = result._asdict()
-            result_dict['match_type'] = 'partial'
+            result_dict['MATCH_TYPE'] = {'ЗИП': True}
             return result_dict
 
         quary_out = quary.filter(func.instr(part_number, obj_table.part_number))
@@ -84,7 +84,7 @@ class AbstractQuaryORM:
         result = session.execute(quary_out).first()
         if result:
             result_dict = result._asdict()
-            result_dict['match_type'] = 'partial'
+            result_dict['MATCH_TYPE'] = {'ЗИП': True}
             return result_dict
         return None
 
@@ -190,7 +190,7 @@ class ArchiveBookRepository(AbstractQuaryORM):
             a.appointment.label('НАЗНАЧЕНИЕ'),
             a.project_code.label('№ ЗАПРОСА'),
             func.sum(a.amount).label('QTY ИЗ АРХИВОВ'),
-            literal('Архив').label('ГДЕ НАШЛИ')
+            literal('Архив').label('ГДЕ НАШЛИ'),
         ).select_from(
             a
         ).join(
@@ -225,6 +225,27 @@ class ArchiveBookRepository(AbstractQuaryORM):
 
         quarys = quary.filter(key == a.part_number)
         result = session.execute(quarys).first()
+        if result:
+            return result._asdict()
+
+    @staticmethod
+    def select_category(session: Session, key: str):
+        m = aliased(MainCategory)
+        a = aliased(ArchiveBook)
+        quary = select(
+            a.category.label('КАТЕГОРИЯ'),
+            m.time.label('ТРУДОЗАТРАТЫ'),
+            m.repair.label('РЕМОНТ')
+        ).select_from(
+            a
+        ).join(
+            m, a.category == m.category
+        ).filter(
+            a.category == m.category,
+            a.part_number == key
+        ).group_by(a.part_number)
+
+        result = session.execute(quary).first()
         if result:
             return result._asdict()
 
@@ -315,6 +336,7 @@ class ORMQuary(IORMQuary):
         else:
             quary_result = self._find_archive_data(keys)
 
+        quary_result = self._find_category_in_archive(quary_result, keys[0])
         quary_result = self._merge_chassis_data(quary_result, keys[0])
 
         if quary_result:
@@ -354,36 +376,49 @@ class ORMQuary(IORMQuary):
                 quary_result = chassis_result
         return quary_result
 
+    def _find_category_in_archive(self, quary_result: dict, key: str):
+        """Поиск категорий в архиви."""
+        category_archive = self._execute_repository_query(ArchiveBookRepository.select_category, key)
+        if category_archive:
+            if quary_result:
+                quary_result.update(category_archive)
+            else:
+                quary_result = category_archive
+        return quary_result
+
     def _log_and_update_item(self, item: dict, quary_result: dict):
         """Логирует результаты и обновляет элемент."""
         zip_result = quary_result.get('ЗИП')
-        book_result = quary_result.get('Где нашли')
-        self.robot_logger.info(f'Нашли {zip_result} в {book_result}')
+        book_result = quary_result.get('ГДЕ НАШЛИ')
+        self.robot_logger.success(f'Нашли {zip_result} в {book_result}')
         item.update(quary_result)
 
     def category_query(self, item: dict, key: str, comment: str):
-        """category__query."""
-        self.robot_logger.debug(f'Процесс поиска категории {key}')
+        """Ищет категорию и обновляет данные в item."""
+        if 'КАТЕГОРИЯ' in item and item['КАТЕГОРИЯ']:
+            return
+
+        self.robot_logger.debug(f'Процесс поиска категории для ключа {key}')
         quary_result = {}
         if comment:
-            collision_result = self._execute_repository_query(
+            quary_result = self._execute_repository_query(
                 CollisionRepository.get_items_by_keys,
                 comment
             )
-            if collision_result:
-                quary_result.update(collision_result)
+
         if not quary_result:
-            category_result = self._execute_repository_query(
-                CategoryRepository.get_items_by_keys, key
+            quary_result = self._execute_repository_query(
+                CategoryRepository.get_items_by_keys,
+                key
             )
-            if category_result:
-                quary_result.update(category_result)
-            else:
-                quary_result.update(
-                    {
-                        'РЕМОНТ': 6001,
-                        'ТРУДОЗАТРАТЫ': 4,
-                        'КАТЕГОРИЯ': 'EMPTY'
-                    }
-                )
+
+        if not quary_result:
+            quary_result = {
+                'РЕМОНТ': 6001,
+                'ТРУДОЗАТРАТЫ': 4,
+                'КАТЕГОРИЯ': 'EMPTY'
+            }
+        else:
+            quary_result['MATCH_TYPE'] = {'КАТЕГОРИЯ': True}
+
         item.update(quary_result)

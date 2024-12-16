@@ -209,12 +209,12 @@ class DatabaseRepository(IDatabaseRepository):
         last_modified = datetime.fromtimestamp(file_path.stat().st_mtime)
         model_type = file_path.parent.name
         try:
-            metadata = session.query(FileMetadata).filter_by(filename=filename).first()
+            metadata = session.query(FileMetadata).filter_by(model_type=model_type).first()
             if metadata:
                 metadata.file_path = str(file_path)
                 metadata.last_modified = last_modified
                 metadata.status = status
-                metadata.model_type = model_type
+                metadata.filename = filename
             else:
                 metadata = FileMetadata(
                     model_type=model_type,

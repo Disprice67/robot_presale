@@ -112,7 +112,7 @@ class ArchiveBook(AbstractTable):
     appointment: Mapped[Optional[str]] = mapped_column(name='НАЗНАЧЕНИЕ')
     amount: Mapped[Optional[str]] = mapped_column(name='КОЛ-ВО')
     project_code: Mapped[Optional[str]] = mapped_column(name='№ ЗАПРОСА')
-    category: Mapped[Optional[str]] = mapped_column(name='Категория')
+    category: Mapped[Optional[str]] = mapped_column(name='КАТЕГОРИЯ')
 
     def __repr__(self) -> str:
         return (f'ArchiveBook(part_number={self.part_number}, cost_of_zip={self.cost_of_zip}, '
