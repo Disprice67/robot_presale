@@ -1,4 +1,4 @@
-from sqlalchemy import delete, Table, inspect
+from sqlalchemy import delete, Table, inspect, text
 from sqlalchemy.orm import Session
 from infrastructure.database.orm.models import AbstractTable, FileMetadata
 from core import IDatabaseRepository, EliminationFilter, IRobotLogger
@@ -34,27 +34,94 @@ class DatabaseRepository(IDatabaseRepository):
     def _ensure_all_tables_exist(self) -> None:
         """
         Проверяет наличие всех таблиц, определённых в модели, и создаёт отсутствующие.
+        Также проверяет столбцы в существующих таблицах и добавляет недостающие.
         """
         try:
             inspector = inspect(self.engine)
             existing_tables = set(inspector.get_table_names())
             all_tables = set(AbstractTable.metadata.tables.keys())
 
-            missing_tables = all_tables - existing_tables
-            if missing_tables:
-                self.robot_logger.info(f"Отсутствующие таблицы: {missing_tables}. Создаём их...")
-                for table_name in missing_tables:
-                    try:
-                        table = AbstractTable.metadata.tables[table_name]
-                        table.create(self.engine)
-                        self.robot_logger.success(f"Таблица '{table_name}' успешно создана.")
-                    except Exception as e:
-                        self.robot_logger.error(f"Ошибка при создании таблицы '{table_name}': {e}")
-                self.robot_logger.success("Все отсутствующие таблицы успешно обработаны.")
-            else:
-                self.robot_logger.debug("Все таблицы уже существуют. Ничего не требуется создавать.")
+            self._create_missing_tables(existing_tables, all_tables)
+
+            self._check_and_update_columns(inspector, existing_tables)
+
         except Exception as e:
-            self.robot_logger.error(f"Ошибка при проверке или создании таблиц: {e}")
+            self.robot_logger.error(f"Ошибка при проверке или создании таблиц и столбцов: {e}")
+
+    def _create_missing_tables(self, existing_tables: set, all_tables: set) -> None:
+        """
+        Создаёт отсутствующие таблицы на основе модели.
+        """
+        missing_tables = all_tables - existing_tables
+        if not missing_tables:
+            self.robot_logger.debug("Все таблицы уже существуют. Ничего не требуется создавать.")
+            return
+
+        self.robot_logger.info(f"Отсутствующие таблицы: {missing_tables}. Создаём их...")
+        for table_name in missing_tables:
+            try:
+                table = AbstractTable.metadata.tables[table_name]
+                table.create(self.engine)
+                self.robot_logger.success(f"Таблица '{table_name}' успешно создана.")
+            except Exception as e:
+                self.robot_logger.error(f"Ошибка при создании таблицы '{table_name}': {e}")
+
+        self.robot_logger.success("Все отсутствующие таблицы успешно обработаны.")
+
+    def _check_and_update_columns(self, inspector, existing_tables: set) -> None:
+        """
+        Проверяет существующие таблицы на наличие недостающих столбцов и добавляет их.
+        """
+        for table_name in existing_tables:
+            try:
+                table_metadata = AbstractTable.metadata.tables[table_name]
+
+                existing_columns = {col['name'] for col in inspector.get_columns(table_name)}
+                defined_columns = {col.name for col in table_metadata.columns}
+
+                self._add_missing_columns(table_name, table_metadata, existing_columns, defined_columns)
+
+            except Exception as e:
+                self.robot_logger.error(f"Ошибка при проверке столбцов таблицы '{table_name}': {e}")
+
+    def _add_missing_columns(self, table_name: str, table_metadata, existing_columns: set, defined_columns: set) -> None:
+        """
+        Добавляет недостающие столбцы в таблицу.
+        """
+        missing_columns = defined_columns - existing_columns
+        if not missing_columns:
+            self.robot_logger.debug(f"В таблице '{table_name}' все столбцы соответствуют модели.")
+            return
+
+        sqlite_type_mapping = {
+            "VARCHAR": "TEXT",
+            "CHAR": "TEXT",
+            "INTEGER": "INTEGER",
+            "BIGINT": "INTEGER",
+            "SMALLINT": "INTEGER",
+            "NUMERIC": "REAL",
+            "FLOAT": "REAL",
+            "DECIMAL": "REAL",
+            "BOOLEAN": "INTEGER",
+            "DATE": "TEXT",
+            "DATETIME": "TEXT",
+            "TEXT": "TEXT",
+            "BLOB": "BLOB",
+        }
+
+        self.robot_logger.info(f"В таблице '{table_name}' отсутствуют столбцы: {missing_columns}. Добавляем их...")
+        with self.engine.connect() as conn:
+            for column_name in missing_columns:
+                try:
+                    column = table_metadata.columns[column_name]
+                    column_type = str(column.type)
+                    column_type = sqlite_type_mapping.get(column_type.upper(), "TEXT")
+                    alter_query = f'ALTER TABLE "{table_name}" ADD COLUMN "{str(column_name)}" {column_type}'
+                    conn.execute(text(alter_query))
+                    self.robot_logger.success(f"Столбец '{column_name}' успешно добавлен в таблицу '{table_name}'.")
+                except Exception as e:
+                    self.robot_logger.error(f"Ошибка при добавлении столбца '{column_name}' в таблицу '{table_name}': {e}")
+
 
     def get_all_tables(self) -> list[str]:
         return list(AbstractTable.metadata.tables.keys())[1:]
@@ -114,7 +181,7 @@ class DatabaseRepository(IDatabaseRepository):
                     continue
         self.robot_logger.success('Данные записаны в БД.')
 
-    def _obj_create(self, table: Table, item: dict): # Добавить аннотацию
+    def _obj_create(self, table: Table, item: dict):
         """Создание объекта таблицы из данных."""
         item = {k.upper(): v for k, v in item.items()}
         obj_instance = self._get_model_class_by_table_name(table.name)()

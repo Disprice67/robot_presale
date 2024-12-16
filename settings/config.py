@@ -66,7 +66,6 @@ class Settings(BaseSettings):
     sysdata: SysData
     huaweidata: HuaweiData
     ebay: Ebay
-    redis_settings: RedisSettings
 
     class Config:
         env_nested_delimiter = '__'

@@ -83,7 +83,6 @@ class RobotLogger(IRobotLogger):
             message['file_name'] = file_path.name
             if excel_file:
                 message['excel_file_path'] = file_path.name
-
         self.redis_client.push_to_queue("logs_queue", message)
 
     def verify_logs_and_alert(self, file_path: Path = None):

@@ -112,11 +112,13 @@ class ArchiveBook(AbstractTable):
     appointment: Mapped[Optional[str]] = mapped_column(name='НАЗНАЧЕНИЕ')
     amount: Mapped[Optional[str]] = mapped_column(name='КОЛ-ВО')
     project_code: Mapped[Optional[str]] = mapped_column(name='№ ЗАПРОСА')
+    category: Mapped[Optional[str]] = mapped_column(name='Категория')
 
     def __repr__(self) -> str:
         return (f'ArchiveBook(part_number={self.part_number}, cost_of_zip={self.cost_of_zip}, '
                 f'zip_values={self.zip_values}, dtk_service={self.dtk_service}, '
-                f'appointment={self.appointment}, amount={self.amount}, project_code={self.project_code}')
+                f'appointment={self.appointment}, amount={self.amount}, project_code={self.project_code}, '
+                f'category={self.category}')
 
 
 class Chassis(AbstractTable):
