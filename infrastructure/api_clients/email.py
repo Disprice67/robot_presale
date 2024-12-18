@@ -10,6 +10,7 @@ from core import IRobotLogger
 class Email(IEmail):
     def __init__(self, settings_outlook: Outlook, buffer_in: Path, robot_logger: IRobotLogger):
         self.recipients = settings_outlook.recipients.split(', ')
+        self.original_recipients = self.recipients.copy()
         self.buffer_in = buffer_in
         self.file_list: list[Path] = []
         self.subject: Optional[str] = None
@@ -35,16 +36,19 @@ class Email(IEmail):
         self.file_list.clear()
 
     def remove_sender_email(self) -> None:
-        self.recipients.remove(self.sender)
+        if self.sender in self.recipients:
+            self.recipients.remove(self.sender)
+            self.recipients = self.original_recipients.copy()
 
     def download_attachments(self,) -> bool:
         """Сохраняет вложения из входящих писем в указанный каталог."""
         try:
             for item in self.account.inbox.all():
                 self.sender = item.sender.email_address
+                self.subject = item.subject
+
                 if self.sender not in self.recipients:
                     self.recipients.append(self.sender)
-                self.subject = item.subject
 
                 for attachment in item.attachments:
                     if attachment.name[attachment.name.rfind('.') - 1] in ('D', 'Y'):

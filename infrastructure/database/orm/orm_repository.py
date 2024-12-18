@@ -19,8 +19,6 @@ from typing import Optional
 
 
 class AbstractQuaryORM:
-
-
     @staticmethod
     def search_by_part_number(quary: Query, obj_table: DeclarativeMeta, part_number: str, session: Session) -> Optional[dict[str, any]]:
         """
@@ -388,6 +386,7 @@ class ORMQuary(IORMQuary):
 
     def _log_and_update_item(self, item: dict, quary_result: dict):
         """Логирует результаты и обновляет элемент."""
+        # Если нигде не нашли, в логи вообще не записываем ничего
         zip_result = quary_result.get('ЗИП')
         book_result = quary_result.get('ГДЕ НАШЛИ')
         self.robot_logger.success(f'Нашли {zip_result} в {book_result}')
