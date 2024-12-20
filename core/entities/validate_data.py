@@ -11,36 +11,30 @@ class InputData(BaseModel):
 
     @field_validator('amount', mode='before')
     def validate_amount(cls, a: Union[str, int, float]) -> Optional[int]:
-        try:
-            if isinstance(a, str):
-                return 0
-            elif a is None:
-                return 0
-            else:
-                assert a % 1 == 0, f'Количество должно быть целым: {a}'
-                return a
-        except AssertionError as e:
-            return f'Additional info: {e}'
+        if isinstance(a, str):
+            return 0
+        elif a is None:
+            return 0
+        else:
+            if not isinstance(a, (int, float)):
+                raise ValueError(f'Неверный тип данных для количества: {a}')
+            if a % 1 != 0:
+                raise ValueError(f'Количество должно быть целым: {a}')
+            return int(a)
 
     @field_validator('part_number', mode='before')
-    def validate_part_number(cls, pn: str) -> str:
-        try:
-            assert pn != '', f'P/N не должен быть пустым: {pn}'
-            if isinstance(pn, str):
-                vals = [val for val in pn if val.isalpha() or val.isnumeric()]
-                result = "".join(vals).upper()
-                assert result != '', f'P/N не прошел валидация: {pn}'
-            # assert str(pn) != 'nan', f'Не должен быть пустым: {pn}'
-            return pn.replace(' ', '').upper()
-        except AssertionError as e:
-            return f'Additional info: {e}'
-
-
-MESSAGE_INFO = ['nullable']
+    def validate_part_number(cls, pn: Union[str, None]) -> str:
+        if pn is None or pn.strip() == '':
+            raise ValueError(f'P/N не должен быть пустым: {pn}')
+        pn = str(pn)
+        vals = [val for val in pn if val.isalnum()]
+        result = "".join(vals).upper()
+        if result == '':
+            raise ValueError(f'P/N не прошел валидацию: {pn}')
+        return result
 
 
 class DataGenerate(BaseModel):
-
     input_data: Union[str, list[InputData]]
     sheet_name: str
 

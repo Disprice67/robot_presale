@@ -1,4 +1,4 @@
-from core.entities.validate_data import InputData
+from core.entities.validate_data import InputData, DataGenerate
 from pathlib import Path
 from typing import Protocol, Optional
 
@@ -14,7 +14,7 @@ class IExcelHandler(Protocol):
     def _sample_file(self,):
         ...
 
-    def read_excel(self, file_path: Path) -> Optional[list[InputData]]:
+    def read_excel(self, file_path_in: Path) -> Optional[list[DataGenerate]]:
         ...
 
     def write_to_excel(self, data: dict, file_path: Path):

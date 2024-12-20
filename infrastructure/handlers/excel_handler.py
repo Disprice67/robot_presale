@@ -5,6 +5,7 @@ from openpyxl import load_workbook
 from openpyxl.styles import Border, Side, PatternFill
 from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.utils import get_column_letter
+from pydantic import ValidationError
 from typing import Optional
 
 
@@ -42,9 +43,9 @@ class ExcelHandler(IExcelHandler):
     def get_output_file(self, filename: str):
         return self._buffer / 'out' / f'{filename}'
 
-    def read_excel(self, file_path_in: Path) -> Optional[list[InputData]]:
+    def read_excel(self, file_path_in: Path) -> Optional[list[DataGenerate]]:
         """get_data_input."""
-        mass: list = []
+        mass: list[DataGenerate] = []
         try:
             with pd.ExcelFile(file_path_in) as excel_file:
                 sheetnames = excel_file.sheet_names
@@ -53,15 +54,23 @@ class ExcelHandler(IExcelHandler):
                         df_excel = pd.read_excel(excel_file, sheet, na_filter=False)
                         df_excel.columns = df_excel.columns.str.upper()
                         records = df_excel.to_dict('records')
-                        try:
-                            a_data = DataGenerate(input_data=records, sheet_name=sheet)
-                            mass.append(a_data)
-                        except Exception as e:
-                            self.robot_logger.error(f'Данные не верные на странице {sheet} в {file_path_in}')    
+                        valid_records = []
+                        for record in records:
+                            try:
+                                InputData(**record)
+                                valid_records.append(record)
+                            except ValidationError as e:
+                                self.robot_logger.info(f'Строка не прошла валидацию на странице {sheet}: {e}')
+                        if valid_records:
+                            try:
+                                a_data = DataGenerate(input_data=valid_records, sheet_name=sheet)
+                                mass.append(a_data)
+                            except ValidationError as e:
+                                self.robot_logger.error(f'Данные не верные на странице {sheet} в {file_path_in}: {e}')
             return mass
         except Exception as e:
             self.robot_logger.error(f'Ошибка при обработке/чтение файла Input_Excel {e}')
-            return
+            return None
 
     def _apply_style_to_range(self, ws: Worksheet, start_cell, end_cell, border=None):
         """Применяет стиль к диапазону ячеек."""
