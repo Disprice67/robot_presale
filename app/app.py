@@ -11,6 +11,7 @@ from services import (DatabaseService,
 
 from infrastructure import (SQLAlchemySettings,
                             DatabaseRepository,
+                            FileEventHandler,
                             MonitorFiles,
                             SYSHandler,
                             ParsingHuawei,
@@ -117,7 +118,11 @@ class AppCoordinator:
             self._monitor_files_service = MonitorFilesService(
                 MonitorFiles(
                     self.database_service,
-                    self._robot_logger
+                    self._robot_logger,
+                    FileEventHandler(
+                        self.database_service,
+                        self._robot_logger
+                    )
                 )
             )
         return self._monitor_files_service

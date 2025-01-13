@@ -18,18 +18,18 @@ class FileEventHandler(FileSystemEventHandler):
 
 
 class MonitorFiles(IMonitorFiles):
-    def __init__(self, database_repository: DatabaseRepository, robot_logger: IRobotLogger):
+    def __init__(self, database_repository: DatabaseRepository, robot_logger: IRobotLogger, file_event_handler: FileEventHandler):
         self.database_repository = database_repository
         self.robot_logger = robot_logger
+        self.file_event_handler = file_event_handler
 
     def start_monitoring(self, directory_paths: list[str]):
         try:
             observers = []
             for path in directory_paths:
-                event_handler = FileEventHandler(self.database_repository, self.robot_logger)
                 # Polling для прода, Observer для теста
                 observer = PollingObserver()
-                observer.schedule(event_handler, path=path, recursive=True)
+                observer.schedule(self.file_event_handler, path=path, recursive=True)
                 observer.start()
                 observers.append(observer)
                 self.robot_logger.info(f'Директория {path} мониторится.')

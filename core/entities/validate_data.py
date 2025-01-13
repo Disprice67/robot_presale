@@ -24,14 +24,14 @@ class InputData(BaseModel):
 
     @field_validator('part_number', mode='before')
     def validate_part_number(cls, pn: Union[str, None]) -> str:
-        if pn is None or pn.strip() == '':
-            raise ValueError(f'P/N не должен быть пустым: {pn}')
         pn = str(pn)
+        if pn == 'None' or pn.strip() == '':
+            raise ValueError(f'P/N не должен быть пустым: {pn}')
         vals = [val for val in pn if val.isalnum()]
         result = "".join(vals).upper()
         if result == '':
             raise ValueError(f'P/N не прошел валидацию: {pn}')
-        return result
+        return pn
 
 
 class DataGenerate(BaseModel):
