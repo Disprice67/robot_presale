@@ -22,7 +22,7 @@ class ParsingHuawei(IParsingHuawei):
     def _post_request(self, key: str) -> Optional[dict]:
         """Отправляет POST-запрос и возвращает данные в формате JSON, если запрос успешен."""
         try:
-            self.payload['quary'] = key
+            self.payload['query'] = key
             response = requests.post(self.url, headers=self.headers, json=self.payload, verify=False)
             response.raise_for_status()
             data = response.json()
@@ -39,7 +39,7 @@ class ParsingHuawei(IParsingHuawei):
             self.robot_logger.info(f"Не получены данные для ключа: {key}")
             return None
 
-        cardlist = data.get('entityCardList', [])
+        cardlist = data[0].get('entityCardList', [])
         if not isinstance(cardlist, list):
             self.robot_logger.error(f"Неверная структура данных для ключа: {key}. Ожидался список 'entityCardList'.")
             return None

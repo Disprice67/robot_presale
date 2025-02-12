@@ -198,6 +198,7 @@ class AppCoordinator:
                 filter_comment = self.data_service.elimination().filter(comment)
 
                 exc_part_numbers = self.data_service.generate_exceptions(
+                    item,
                     part_number,
                     vendor,
                 )

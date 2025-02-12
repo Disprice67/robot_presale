@@ -35,14 +35,13 @@ class AbstractQuaryORM:
                 (
                     part_number == obj_table.part_number,
                     case(
-                        (obj_table == aliased(ArchiveBook), getattr(obj_table, 'zip_values', None)),
+                        (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
                         else_=obj_table.part_number
                     )
                 ),
                 else_=None
             ).label('ЗИП')
         )
-
         result = session.execute(quary_exact).first()
         if result:
             return result._asdict()
@@ -53,7 +52,7 @@ class AbstractQuaryORM:
                 (
                     obj_table.part_number.like(f"%{part_number}%"),
                     case(
-                        (obj_table == aliased(ArchiveBook), getattr(obj_table, 'zip_values', None)),
+                        (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
                         else_=obj_table.part_number
                     )
                 ),
@@ -72,7 +71,7 @@ class AbstractQuaryORM:
                 (
                     func.instr(part_number, obj_table.part_number) > 0,
                     case(
-                        (obj_table == aliased(ArchiveBook), getattr(obj_table, 'zip_values', None)),
+                        (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
                         else_=obj_table.part_number
                     )
                 ),
@@ -326,7 +325,7 @@ class ORMQuary(IORMQuary):
 
     def directory_books_query(self, item: dict, keys: list) -> None:
         """Основной процесс поиска данных и обновления элемента."""
-        self.robot_logger.debug(f'Процесс поиска по directory_books {keys[0]}')
+        self.robot_logger.debug(f'Процесс поиска по directory_books {keys}')
 
         quary_result = self._find_primary_data(keys)
         if quary_result:

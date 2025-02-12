@@ -40,7 +40,12 @@ class RedisClient:
     def get_from_queue(self, queue_name: str):
         """Извлечь сообщение из очереди только если соединение активно."""
         if self.is_redis_connected:
-            return self.client.rpop(queue_name)
+            try:
+                files_db_update = self.client.rpop(queue_name)
+                return json.loads(files_db_update[1]) if files_db_update else None
+            except json.JSONDecodeError as e:
+                self.robot_logger.error(f"Ошибка декодирования JSON: {e}")
+                return None
         else:
             self.robot_logger.error('Не удалось подключиться к Redis. Не удалось извлечь сообщение из очереди.')
             return None

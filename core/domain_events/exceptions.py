@@ -28,16 +28,22 @@ class ExceptionGenerator:
                 result.extend(part_num.replace(exc, r) for r in repl_values)
         return result
 
-    def generate_exceptions(self, key: str, vendor: str) -> list[str]:
+    def generate_exceptions(self, item: dict, key: str, vendor: str) -> list[str]:
         """Generate exception part numbers based on the provided key and vendor."""
-        item = []
+        part_numbers = []
 
-        if vendor == 'HUAWEI':
+        if vendor.upper() == 'HUAWEI':
             pars = self.parsing_instance.get_part_and_model(key)
             if pars:
-                item.extend(pars)
-        elif vendor == 'CISCO' and 'R-' in key:
-            item.append(key.replace('R-', ''))
+                item['MODEL/PN'] = ', '.join(pars)
+        elif vendor.upper() == 'CISCO' and 'R-' in key:
+            part_numbers.append(key.replace('R-', ''))
 
-        item.extend(self._replace_key(key))
-        return item
+        if item.get('MODEL/PN'):
+            replaces_list = []
+            for pn in pars:
+                replaces_list.extend(self._replace_key(pn))
+            part_numbers.extend(replaces_list)
+        else:
+            part_numbers.extend(self._replace_key(key))
+        return part_numbers
