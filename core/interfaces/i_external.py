@@ -11,9 +11,6 @@ class IEbay(Protocol):
 
 class IEmail(Protocol):
 
-    def remove_sender_email(self) -> None:
-        ...
-
     def get_file_list(self) -> list[Path]:
         ...
 
