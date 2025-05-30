@@ -7,6 +7,7 @@ from typing import Optional
 from pathlib import Path
 from settings.config import SysData, HuaweiHeader
 from core import IRobotLogger
+from io import BytesIO
 
 
 class ParsingSYS:
@@ -19,16 +20,321 @@ class ParsingSYS:
         self.robot_logger = robot_logger
         self.headers = {'User-Agent': header.user_agent}
         self.params = {
-            'columns': {"activity": 'true'},
-            'filter': {
-                "code": "",
-                "additionalCrocCode": "",
-                "serviceDirections": ["DIR000094"],
+            "columns": [
+                {
+                    "field": "redirectCol",
+                    "title": "",
+                    "width": 40,
+                    "sortable": False,
+                    "isVisible": True,
+                    "displayFieldName": None,
+                    "excelExportName": None,
+                    "isIconColumn": True
+                },
+                {
+                    "field": "crocCode",
+                    "title": "КрокКод СДО",
+                    "width": 150,
+                    "sortable": True,
+                    "isVisible": True,
+                    "displayFieldName": None,
+                    "excelExportName": "CrocCode",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "hierarchicalNumber",
+                    "title": "Иерархический номер",
+                    "width": 200,
+                    "sortable": True,
+                    "isVisible": True,
+                    "displayFieldName": None,
+                    "excelExportName": "HierarchicalNumber",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "organization.shortName",
+                    "title": "Клиент",
+                    "width": 300,
+                    "sortable": True,
+                    "isVisible": True,
+                    "displayFieldName": "organization.displayName",
+                    "excelExportName": "OrganizationName",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "startDate",
+                    "title": "Дата начала",
+                    "width": 100,
+                    "sortable": True,
+                    "isVisible": True,
+                    "displayFieldName": None,
+                    "excelExportName": "StartDate",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "endDate",
+                    "title": "Дата окончания",
+                    "width": 125,
+                    "sortable": True,
+                    "isVisible": True,
+                    "displayFieldName": None,
+                    "excelExportName": "EndDate",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "activity.name",
+                    "title": "Активность",
+                    "width": 300,
+                    "sortable": True,
+                    "isVisible": True,
+                    "displayFieldName": "activity.displayName",
+                    "excelExportName": "ActivityName",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "status",
+                    "title": "Статус",
+                    "width": 100,
+                    "sortable": True,
+                    "isVisible": True,
+                    "displayFieldName": None,
+                    "excelExportName": "Status",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "executor.LastName",
+                    "title": "Администратор",
+                    "width": 200,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": "administrator",
+                    "excelExportName": "AdministratorName",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "currencyCode",
+                    "title": "Валюта документа",
+                    "width": 160,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "CurrencyCode",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "prolongationAgreement",
+                    "title": "Договор пролонгации",
+                    "width": 180,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "ProlongationAgreement",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "comment",
+                    "title": "Комментарий",
+                    "width": 260,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "Comment",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "isRequiredNotifications",
+                    "title": "Нотификация по заявкам",
+                    "width": 200,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "IsRequiredNotifications",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "refusalCause",
+                    "title": "Причина отказа от пролонгации",
+                    "width": 240,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": "refusalCause.displayName",
+                    "excelExportName": "RefusalCauseName",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "prolongationType",
+                    "title": "Пролонгация",
+                    "width": 120,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "ProlongationType",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "serviceManagers",
+                    "title": "Сервис-менеджеры",
+                    "width": 300,
+                    "sortable": False,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "ServiceManagers",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "projectManagers",
+                    "title": "Менеджеры проекта",
+                    "width": 300,
+                    "sortable": False,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "ProjectManagers",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "techManagers",
+                    "title": "Технические менеджеры",
+                    "width": 300,
+                    "sortable": False,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "TechManagers",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "documentumFileLink",
+                    "title": "Ссылка на документ с ЕЦП",
+                    "width": 300,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "DocumentumFileLink",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "amount",
+                    "title": "Сумма контракта в валюте документа",
+                    "width": 280,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "Amount",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "amountRub",
+                    "title": "Сумма контракта в рублях",
+                    "width": 200,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "AmountRub",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "firm.name",
+                    "title": "Фирма",
+                    "width": 90,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": "firm.displayName",
+                    "excelExportName": "FirmName",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "directions",
+                    "title": "Направления договора",
+                    "width": 300,
+                    "sortable": False,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "Directions",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "directors",
+                    "title": "Директор Клиента",
+                    "width": 300,
+                    "sortable": False,
+                    "isVisible": True,
+                    "displayFieldName": None,
+                    "excelExportName": "DirectorName",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "organization.currentClientSegment",
+                    "title": "Сегмент клиента ДИРС2",
+                    "width": 200,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "CurrentClientSegment",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "organization.clientCardIB.SegmentManual",
+                    "title": "Сегмент клиента ИБ1",
+                    "width": 200,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": "currentClientSegmentIB",
+                    "excelExportName": "CurrentClientSegmentIB",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "servicePlans",
+                    "title": "Программы обслуживания",
+                    "width": 200,
+                    "sortable": False,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "ServicePlans",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "subAgreements",
+                    "title": "Субподрядные договоры",
+                    "width": 200,
+                    "sortable": False,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "SubAgreements",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "otherAgreementForCU.crocCode",
+                    "title": "Договор учета КЕ",
+                    "width": 200,
+                    "sortable": True,
+                    "isVisible": False,
+                    "displayFieldName": "otherAgreementForCU.displayName",
+                    "excelExportName": "OtherAgreementForCU",
+                    "isIconColumn": False
+                },
+                {
+                    "field": "isOtherClientAgreements",
+                    "title": "По Клиенту есть договоры других направлений",
+                    "width": 200,
+                    "sortable": False,
+                    "isVisible": False,
+                    "displayFieldName": None,
+                    "excelExportName": "IsOtherClientAgreements",
+                    "isIconColumn": False
+                }
+            ],
+            "filter": {
+                "directions": {
+                    "IsListSearch": True,
+                    "ItemList": [
+                        "DIR000094"
+                    ]
+                },
                 "negativeFilters": [],
+                "onlyService": False,
                 "gridState": {
-                    "group": [],
-                    "sort": [],
-                    "take": self.TAKE
+                    "skip": 0,
+                    "take": 80,
+                    "sort": []
                 }
             }
         }
@@ -50,16 +356,17 @@ class ParsingSYS:
             return None
 
     def _decode_and_process_file(self, encoded_data: str, output_path: Path) -> None:
-        """Декодирует файл, извлекает активные коды и сохраняет их в Excel."""
+        """Декодирует файл, извлекает уникальные активные коды и сохраняет их в Excel."""
         try:
             decoded_data = base64.b64decode(encoded_data)
-            with pd.ExcelFile(decoded_data) as xls:
+            with pd.ExcelFile(BytesIO(decoded_data)) as xls:
                 df = pd.read_excel(xls, sheet_name=0)
-            # убрать дубли
-            codes = [
+
+            codes = {
                 active[1:9] for active in df.get('Активность', [])
                 if isinstance(active, str) and len(active) > 8
-            ]
+            }
+
             wb = Workbook()
             ws = wb.active
             ws['A1'] = 'КОД ПРОЕКТА'
@@ -67,6 +374,7 @@ class ParsingSYS:
                 ws[f'A{ind}'] = code
 
             wb.save(output_path)
+            self.robot_logger.success('Договора из СУС обновлены.')
         except Exception as e:
             self.robot_logger.error(f"Ошибка при декодировании и обработке файла: {e}")
 

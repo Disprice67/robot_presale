@@ -190,6 +190,7 @@ class DatabaseRepository(IDatabaseRepository):
                 attr_name = attr.expression.name
                 if attr_name in item:
                     value = item[attr_name]
+                    print(value)
                     if not attr.columns[0].nullable:
                         if not isinstance(value, str) or not value:
                             return

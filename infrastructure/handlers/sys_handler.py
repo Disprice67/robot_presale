@@ -15,7 +15,6 @@ class SYSHandler(ISYSHandler):
 
     def _sheduler_update_sys(self, sys_dir: Path) -> None:
         self.parsing_sys.parsing_active(sys_dir)
-        self.robot_logger.success('Договора из суса обновлены.')
 
     def start_monitoring(self) -> bool:
         try:

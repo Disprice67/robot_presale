@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Union
 from sqlalchemy.orm import as_declarative, mapped_column, declared_attr, Mapped
 from datetime import datetime
 
