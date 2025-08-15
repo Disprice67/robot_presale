@@ -22,6 +22,12 @@ class InputData(BaseModel):
                 raise ValueError(f'Количество должно быть целым: {a}')
             return int(a)
 
+    @field_validator('description', mode='before')
+    def validate_description(cls, description: Union[str, int, float, None]):
+        if isinstance(description, int) or isinstance(description, float):
+            return str(description)
+        return description
+
     @field_validator('part_number', mode='before')
     def validate_part_number(cls, pn: Union[str, None]) -> str:
         pn = str(pn)

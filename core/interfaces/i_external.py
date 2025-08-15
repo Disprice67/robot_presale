@@ -1,11 +1,35 @@
-from core.domain_events.eliminations import EliminationFilter
 from typing import Protocol, Optional
 from pathlib import Path
 
 
-# ExternalResourceInterface
+class IPartNumberFilter(Protocol):
+    @staticmethod
+    def normalize_part_number(self, part_number: str) -> str:
+        """Filter key to ensure it's cleaned and normalized."""
+        ...
+
+    def calculate_similarity_score(self, query: str, db_value: str) -> float:
+        """Calculate similarity score between query and database value considering length, structure, and suffixes."""
+        ...
+
+
 class IEbay(Protocol):
-    def searchebay(self, item: dict, key: str, vendor: str, ifilter: EliminationFilter) -> None:
+    async def searchebay(self, item: dict, key: str, vendor: str, ifilter: IPartNumberFilter) -> None:
+        ...
+
+
+class IBouz(Protocol):
+    async def search_by_part_number(self, item: str, part_number: str, vendor: str, ifilter: IPartNumberFilter):
+        ...
+
+
+class INag(Protocol):
+    def search_by_part_number(self, item: str, part_number: str, vendor: str, ifilter: IPartNumberFilter):
+        ...
+
+
+class IYandexMarket(Protocol):
+    async def search_by_part_number(self, item: str, part_number: str, vendor: str, ifilter: IPartNumberFilter):
         ...
 
 
@@ -25,5 +49,5 @@ class IEmail(Protocol):
 
 
 class IParsingHuawei(Protocol):
-    def get_part_and_model(self, key: str) -> Optional[list[str]]:
+    async def get_part_and_model(self, key: str) -> Optional[list[str]]:
         ...

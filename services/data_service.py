@@ -1,19 +1,16 @@
-from core import EliminationFilter, ExceptionGenerator, IParsing, Economics
+from core import ExceptionGenerator, Economics, IPartNumberFilter
 
 
 class DataService:
 
     def __init__(
-            self, elimination_filter: EliminationFilter,
+            self, part_number_filter: IPartNumberFilter,
             exception_generator: ExceptionGenerator,
             economics: Economics
     ):
-        self._elimination_filter = elimination_filter
+        self._part_number_filter = part_number_filter
         self._exception_generator = exception_generator
         self._economics = economics
-
-    def elimination(self,):
-        return self._elimination_filter
 
     def generate_exceptions(self, item: dict, key: str, vendor: str,) -> list:
         return self._exception_generator.generate_exceptions(item, key, vendor)

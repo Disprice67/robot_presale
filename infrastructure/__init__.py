@@ -10,6 +10,9 @@ from .api_clients.sys import ParsingSYS
 from .api_clients.ebay import EbayCom
 from .api_clients.email import Email
 from .api_clients.huawei import ParsingHuawei
+from .api_clients.bouz import BouzParser
+from .api_clients.nag import NagParser
+from .api_clients.yandex_market import YandexMarketParser
 
 from .logger.logger_conf import RobotLogger
 from .logger.redis_client import RedisClient
@@ -29,5 +32,8 @@ __all__ = [
     'ORMQuary',
     'ExcelHandler',
     'RobotLogger',
-    'RedisClient'
+    'RedisClient',
+    'BouzParser',
+    'NagParser',
+    'YandexMarketParser'
 ]

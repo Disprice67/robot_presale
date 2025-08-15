@@ -23,7 +23,7 @@ class SYSHandler(ISYSHandler):
             scheduler.add_job(
                 lambda: self._sheduler_update_sys(fulldir),
                 'interval',
-                days=1
+                days=3
             )
             scheduler.start()
             return True

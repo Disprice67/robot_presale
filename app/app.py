@@ -1,13 +1,13 @@
-from core import InputData, EliminationFilter, ExceptionGenerator, Economics
+from core import InputData, PartNumberFilter, ExceptionGenerator, Economics
 from services import (DatabaseService,
                       ORMService,
-                      EbayService,
                       EmailService,
                       HuaweiService,
                       MonitorFilesService,
                       ExcelHandlerService,
                       SYSHandlerService,
-                      DataService)
+                      DataService,
+                      ExternalSearchService)
 
 from infrastructure import (SQLAlchemySettings,
                             DatabaseRepository,
@@ -20,12 +20,18 @@ from infrastructure import (SQLAlchemySettings,
                             Email,
                             ORMQuary,
                             ExcelHandler,
-                            RobotLogger)
+                            RobotLogger,
+                            BouzParser,
+                            NagParser,
+                            YandexMarketParser)
 
 from settings.config import Settings
 from pathlib import Path
 import os
 import time
+import asyncio
+import aiofiles.os
+
 
 class AppCoordinator:
     def __init__(
@@ -39,13 +45,14 @@ class AppCoordinator:
     ):
         self._database_service = None
         self._orm_service = None
-        self._ebay_service = None
+        self._external_search_service = None
         self._email_service = None
         self._huawei_service = None
         self._monitor_files_service = None
         self._excel_handler_service = None
         self._sys_handler_service = None
         self._data_service = None
+        self._bouz_service = None
 
         self._settings = settings
         self._sql_alchemy_settings = sql_aclhemy_settings
@@ -61,7 +68,8 @@ class AppCoordinator:
             self._database_service = DatabaseService(
                 DatabaseRepository(
                     self._sql_alchemy_settings,
-                    self._robot_logger
+                    self._robot_logger,
+                    PartNumberFilter(self._robot_logger)
                 )
             )
         return self._database_service
@@ -72,21 +80,24 @@ class AppCoordinator:
             self._orm_service = ORMService(
                 ORMQuary(
                     self._sql_alchemy_settings,
-                    self._robot_logger
+                    self._robot_logger,
+                    PartNumberFilter(self._robot_logger)
                 )
             )
         return self._orm_service
 
     @property
-    def ebay_service(self) -> EbayService:
-        if self._ebay_service is None:
-            self._ebay_service = EbayService(
-                EbayCom(
-                    self._settings.ebay,
-                    self._robot_logger
-                )
+    def external_search_service(self) -> ExternalSearchService:
+        if self._external_search_service is None:
+            self._external_search_service = ExternalSearchService(
+                bouz=BouzParser(self._robot_logger),
+                nag=NagParser(self._robot_logger),
+                ebay=EbayCom(self._settings.ebay, self._robot_logger),
+                yandex_market=YandexMarketParser(self._robot_logger),
+                robot_logger=self._robot_logger,
+                usd_rate=100
             )
-        return self._ebay_service
+        return self._external_search_service
 
     @property
     def email_service(self) -> EmailService:
@@ -158,73 +169,75 @@ class AppCoordinator:
     def data_service(self,) -> DataService:
         if self._data_service is None:
             self._data_service = DataService(
-                EliminationFilter(
+                part_number_filter=PartNumberFilter(
                     self._robot_logger
                 ),
-                ExceptionGenerator(
+                exception_generator=ExceptionGenerator(
                     ParsingHuawei(
                         self._settings.huaweidata,
                         self._settings.huaweidata.header,
                         self._robot_logger
                     ),
-                    self._robot_logger,
+                    self._robot_logger
                 ),
-                Economics(
+                economics=Economics(
                     self._robot_logger
                 )
             )
         return self._data_service
 
-    def _monitor_files(self):
+    async def _monitor_files(self):
         """Мониторинг файлов в указанных каталогах."""
         directories_to_monitor = [
             self._network_disk_dir / table
-            for table in self.database_service.get_all_tables()
-            ]
-        return self.monitor_files_service.start_monitoring(directories_to_monitor)
+            for table in await self.database_service.get_all_tables()
+        ]
+        self.monitor_files_service.start_monitoring(directories_to_monitor)
 
     def _handle_excel(self, file_path: Path) -> list[InputData]:
-        """Обработка Excel-файла."""
+        """Обработка Excel-файла (синхронная)."""
         return self.excel_handler_service.read_excel(file_path)
 
-    def _collection_data(self, input_data: list[InputData]):
+    async def _collection_data(self, input_data: list[InputData]):
         data_generate_dict_list = [data.dict(by_alias=True) for data in input_data]
-        for mass in data_generate_dict_list:
-            for index, item in enumerate(mass.get('input_data')):
+
+        async def process_item(item):
+            try:
                 part_number = item.get('P/N')
                 vendor = item.get('ВЕНДОР')
                 comment = item.get('ОПИСАНИЕ')
+                normalized_comment = self.data_service._part_number_filter.normalize_part_number(comment)
+                normalized_part_number = self.data_service._part_number_filter.normalize_part_number(part_number)
 
-                filter_comment = self.data_service.elimination().filter(comment)
-
-                exc_part_numbers = self.data_service.generate_exceptions(
-                    item,
-                    part_number,
-                    vendor,
+                exc_part_numbers = await self.data_service.generate_exceptions(
+                    item, normalized_part_number, vendor
                 )
-                self.orm_service.directory_books_query(item, exc_part_numbers)
-                self.orm_service.category_query(item, part_number, filter_comment)
+
+                await self.orm_service.directory_books_query(item, exc_part_numbers, normalized_comment)
+
                 self.data_service.costs_by_category(item)
 
                 category = item.get('КАТЕГОРИЯ')
                 if category not in ('LIC-1', 'SOFT-1', 'MSCL'):
-                    self.ebay_service.searchebay(
-                        item,
-                        part_number,
-                        vendor,
-                        self.data_service.elimination()
+                    await self.external_search_service.search(
+                        item, part_number, vendor, self.data_service._part_number_filter
                     )
+            except Exception as e:
+                self._robot_logger.error(f"Error processing item {item.get('P/N')}: {e}")
+
+        tasks = [process_item(item) for mass in data_generate_dict_list for item in mass.get('input_data')]
+        await asyncio.gather(*tasks, return_exceptions=False)
+
         return data_generate_dict_list
 
-    def _process_file(self, file_path):
+    async def _process_file(self, file_path: Path):
         """Обрабатываем один файл: извлекаем данные, записываем и отправляем email."""
         try:
             _input_data = self._handle_excel(file_path)
             if not _input_data:
                 self._robot_logger.info(f"No data found in {file_path}")
                 return False
-
-            _data_collection = self._collection_data(_input_data)
+            _data_collection = await self._collection_data(_input_data)
             for data in _data_collection:
                 if self.excel_handler_service.write_to_excel(data, file_path.name):
                     self.email_service.send_email(
@@ -236,38 +249,39 @@ class AppCoordinator:
             self._robot_logger.error(f"Error processing file {file_path}: {e}")
             return False
 
-    def _process_email_batch(self):
+    async def _process_email_batch(self):
         """Обработка пакета email, включая загрузку и обработку файлов."""
         if self.email_service.download_attachments():
             self._robot_logger.info("Email batch processed successfully")
             for file_path in self.email_service.get_file_list():
-                self._process_file(file_path)
+                await self._process_file(file_path)
                 self._robot_logger.verify_logs_and_alert(file_path)
-                time.sleep(3)
-                file_path.unlink()
+                await asyncio.sleep(3)
+                await aiofiles.os.unlink(file_path)
             self.email_service.clear_file_list()
 
-    def _monitor_and_process(self):
+    async def _monitor_and_process(self):
         """Запуск мониторинга файлов и обработки email."""
-        self._monitor_files()
-        self.sys_handler_service.start_monitoring()
+        monitor_task = asyncio.create_task(self._monitor_files())
+        # sys_monitor_task = asyncio.create_task(self.sys_handler_service.start_monitoring())
         self._robot_logger.verify_logs_and_alert()
 
         while True:
             try:
-                self._process_email_batch()
-                time.sleep(10)
+                await self._process_email_batch()
+                await asyncio.sleep(10)
             except Exception as e:
                 self._robot_logger.critical(f"Unexpected error: {e}")
                 self._robot_logger.verify_logs_and_alert()
-                time.sleep(10)
+                await asyncio.sleep(10)
 
-    def robot_process(self):
+    async def robot_process(self):
         """Запуск работы робота."""
         try:
             self._robot_logger.clear_log_file()
-            self._monitor_and_process()
+            await self._monitor_and_process()
         except Exception as e:
             self._robot_logger.critical(f"Fatal error in robot process: {e}")
             self._robot_logger.verify_logs_and_alert()
-            time.sleep(100)
+            await asyncio.sleep(100)
+
