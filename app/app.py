@@ -284,4 +284,3 @@ class AppCoordinator:
             self._robot_logger.critical(f"Fatal error in robot process: {e}")
             self._robot_logger.verify_logs_and_alert()
             await asyncio.sleep(100)
-

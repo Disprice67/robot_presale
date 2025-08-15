@@ -124,8 +124,8 @@ class EbayCom(IEbay):
                         self.robot_logger.info(f"По запросу {params['q']} ничего не найдено.")
                         return None
 
-                    all_urls = [item.get("itemWebUrl", "") for item in items if item.get("itemWebUrl")]
-                    await self._save_raw_urls(key, all_urls)
+                    # all_urls = [item.get("itemWebUrl", "") for item in items if item.get("itemWebUrl")]
+                    # await self._save_raw_urls(key, all_urls)
 
                     self.robot_logger.success(f"Найдено {search_count} позиций для {params['q']}.")
                     return items
