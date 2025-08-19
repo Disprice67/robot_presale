@@ -30,5 +30,5 @@ class SYSHandlerService:
     def __init__(self, sys_handler: ISYSHandler):
         self.sys_handler = sys_handler
 
-    def start_monitoring(self,) -> bool:
-        return self.sys_handler.start_monitoring()
+    async def start_monitoring(self,) -> bool:
+        return await self.sys_handler.start_monitoring()

@@ -1,24 +1,28 @@
-import requests
-from requests_ntlm import HttpNtlmAuth
-from openpyxl import Workbook
-import base64
-import pandas as pd
+import aiohttp
+import asyncio
+from datetime import datetime, timedelta
 from typing import Optional
 from pathlib import Path
+from openpyxl import Workbook
+import pandas as pd
 from settings.config import SysData, HuaweiHeader
 from core import IRobotLogger
 from io import BytesIO
+import base64
 
 
 class ParsingSYS:
     TAKE = 80
+    TOKEN_URL = "https://fs.croc.ru/adfs/oauth2/token"
 
     def __init__(self, settings_sys: SysData, header: HuaweiHeader, robot_logger: IRobotLogger):
         self.url = settings_sys.url_sys_agreements
-        self.username = settings_sys.sys_username
-        self.password = settings_sys.sys_password
+        self.client_id = settings_sys.client_id
+        self.client_secret = settings_sys.client_secret
         self.robot_logger = robot_logger
         self.headers = {'User-Agent': header.user_agent}
+        self.access_token = None
+        self.token_expires_at = None
         self.params = {
             "columns": [
                 {
@@ -325,9 +329,7 @@ class ParsingSYS:
             "filter": {
                 "directions": {
                     "IsListSearch": True,
-                    "ItemList": [
-                        "DIR000094"
-                    ]
+                    "ItemList": ["DIR000094"]
                 },
                 "negativeFilters": [],
                 "onlyService": False,
@@ -339,19 +341,73 @@ class ParsingSYS:
             }
         }
 
-    def _post(self, url: str) -> Optional[dict]:
-        """Отправляет POST-запрос и возвращает JSON-данные при успешном ответе."""
+    async def _refresh_token(self) -> bool:
+        """Запрашивает новый access-токен через Client Credentials Flow асинхронно."""
         try:
-            response = requests.post(
-                url=url,
-                headers=self.headers,
-                json=self.params,
-                verify=False,
-                auth=HttpNtlmAuth(self.username, self.password)
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
+            payload = {
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "scope": "openid"  # Уточните scope у администратора ADFS
+            }
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.TOKEN_URL,
+                    data=payload,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    ssl=False
+                ) as response:
+                    response.raise_for_status()
+                    token_data = await response.json()
+                    print(token_data)
+                    self.access_token = token_data["access_token"]
+                    expires_in = token_data.get("expires_in", 3600)  # По умолчанию 1 час
+                    self.token_expires_at = datetime.now() + timedelta(seconds=expires_in)
+                    self.robot_logger.success("Новый токен получен.")
+                    return True
+        except aiohttp.ClientError as e:
+            self.robot_logger.critical(f"Ошибка получения токена: {e}")
+            return False
+
+    async def _check_token_status(self) -> bool:
+        """Проверяет статус токена и обновляет его, если необходимо."""
+        if self.access_token:
+            self.robot_logger.debug("Токен валиден.")
+            return True
+
+        self.robot_logger.debug("Токен отсутствует или истек, обновляем.")
+        return await self._refresh_token()
+
+    async def _get_headers(self) -> dict:
+        """Формирует заголовки с токеном."""
+        if not await self._check_token_status():
+            self.robot_logger.critical("Не удалось получить валидный токен.")
+            raise ValueError("Токен недоступен")
+        return {
+            "Authorization": f"Bearer {self.access_token}",
+            "User-Agent": self.headers["User-Agent"],
+            "Content-Type": "application/json"
+        }
+
+    async def _post(self, url: str) -> Optional[dict]:
+        """Отправляет асинхронный POST-запрос с OAuth2 Bearer-токеном."""
+        try:
+            headers = await self._get_headers()
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url=url,
+                    headers=headers,
+                    json=self.params,
+                    ssl=False
+                ) as response:
+                    response.raise_for_status()
+                    return await response.json()
+        except aiohttp.ClientError as e:
+            if e.status == 401:
+                self.robot_logger.debug("Токен недействителен, пытаемся обновить.")
+                self.access_token = None  # Сбрасываем токен
+                if await self._refresh_token():
+                    return await self._post(url)  # Повторяем запрос с новым токеном
             self.robot_logger.error(f"Ошибка при выполнении запроса: {e}")
             return None
 
@@ -378,11 +434,11 @@ class ParsingSYS:
         except Exception as e:
             self.robot_logger.error(f"Ошибка при декодировании и обработке файла: {e}")
 
-    def parsing_active(self, sys_dir: Path) -> None:
-        """Выполняет парсинг активных кодов и сохраняет их в файл Excel."""
+    async def parsing_active(self, sys_dir: Path) -> None:
+        """Выполняет асинхронный парсинг активных кодов и сохраняет их в файл Excel."""
         self.robot_logger.debug('Процесс обновления договоров через СУС')
         fulldir = sys_dir / 'Договора.xlsx'
-        response_data = self._post(self.url)
+        response_data = await self._post(self.url)
         if not response_data:
             return
 

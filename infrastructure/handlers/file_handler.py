@@ -3,6 +3,7 @@ from watchdog.observers.polling import PollingObserver
 from watchdog.events import FileSystemEventHandler
 from core import IMonitorFiles, IRobotLogger
 from pathlib import Path
+import asyncio
 
 
 class FileEventHandler(FileSystemEventHandler):
@@ -13,7 +14,7 @@ class FileEventHandler(FileSystemEventHandler):
     def on_modified(self, event):
         path_name = Path(event.src_path)
         if not event.is_directory and path_name.name.endswith(('.xlsx',)) and '~$' not in path_name.name:
-            self.database_repository.update_table(event)
+            asyncio.create_task(self.database_repository.update_table(event))
             self.robot_logger.info(f'Директория обновлена {event.src_path}')
 
 
@@ -27,7 +28,6 @@ class MonitorFiles(IMonitorFiles):
         try:
             observers = []
             for path in directory_paths:
-                # Polling для прода, Observer для теста
                 observer = PollingObserver()
                 observer.schedule(self.file_event_handler, path=path, recursive=True)
                 observer.start()

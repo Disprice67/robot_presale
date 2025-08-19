@@ -25,5 +25,5 @@ class IExcelHandler(Protocol):
 
 
 class ISYSHandler(Protocol):
-    def start_monitoring(self):
+    async def start_monitoring(self):
         ...
