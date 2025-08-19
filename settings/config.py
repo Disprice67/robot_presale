@@ -5,21 +5,15 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 BUFFER_DIR = BASE_DIR / 'infrastructure/folders/buffer'
-NETWORK_DISK = BASE_DIR / 'infrastructure/folders/network_disk'
 LOG_FILE = BASE_DIR / 'settings/logs/robot.log'
 
 ENV = os.path.join(os.path.dirname(__file__), ".env")
 
-REDIS_HOST = os.getenv('REDIS_HOST', 'redis_app')
-REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
-
 
 # Ebay
 class Ebay(BaseModel):
-    api_key: str
-    cert_id: str
-    dev_id: str
-    token: str
+    app_id: str
+    client_secret: str
 
 
 # Outlook
@@ -47,8 +41,8 @@ class HuaweiData(BaseModel):
 # SYS
 class SysData(BaseModel):
     url_sys_agreements: str
-    sys_username: str
-    sys_password: str
+    client_id: str
+    client_secret: str
 
 
 # Folders
@@ -72,3 +66,9 @@ class Settings(BaseSettings):
         env_file = ENV
         env_file_encoding = 'utf-8'
         extra = 'ignore'
+
+
+try:
+    from settings.local_settings import *
+except:
+    from settings.prod_settings import *

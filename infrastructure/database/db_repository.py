@@ -1,54 +1,68 @@
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, Table, inspect, text
 from sqlalchemy.orm import Session
 from infrastructure.database.orm.models import AbstractTable, FileMetadata
-from core import IDatabaseRepository, EliminationFilter, IRobotLogger
+from core import IDatabaseRepository, IPartNumberFilter, IRobotLogger
 from infrastructure.database.settings.db_settings import SQLAlchemySettings
 import pandas as pd
 from pathlib import Path
 from sqlalchemy.ext.declarative import DeclarativeMeta
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+import asyncio
 
 
 class DatabaseRepository(IDatabaseRepository):
-    def __init__(self, settings_aclhemy: SQLAlchemySettings, robot_logger: IRobotLogger) -> None:
-        self.session = settings_aclhemy.session_factory
-        self.engine = settings_aclhemy.engine
+    def __init__(self, settings_alchemy: SQLAlchemySettings, 
+                 robot_logger: IRobotLogger,
+                 part_number_filter: IPartNumberFilter) -> None:
+        self.session_factory = settings_alchemy.session_factory
+        self.engine = settings_alchemy.engine
         self.robot_logger = robot_logger
+        self.part_number_filter = part_number_filter
+        self._db_lock = asyncio.Lock()
 
-        if not self._is_database_initialized():
-            self._create_all_tables()
+    async def initialize(self):
+        """Инициализация базы данных и пользовательских функций."""
+        await self.settings_alchemy.initialize()
+        if not await self._is_database_initialized():
+            await self._create_all_tables()
+        await self._ensure_all_tables_exist()
 
-        self._ensure_all_tables_exist()
-
-    def _is_database_initialized(self) -> bool:
+    async def _is_database_initialized(self) -> bool:
         """Проверяет, инициализирована ли база данных (существуют ли таблицы)."""
-        inspector = inspect(self.engine)
-        existing_tables = inspector.get_table_names()
-        if existing_tables:
-            self.robot_logger.info('База данных уже инициализирована.')
-            return True
-        self.robot_logger.info("База данных не найдена. Создаем новую.")
-        return False
+        async with self._db_lock:
+            async with self.engine.connect() as conn:
+                def sync_inspect(connection):
+                    inspector = inspect(connection)
+                    return inspector.get_table_names()
 
-    def _ensure_all_tables_exist(self) -> None:
+                existing_tables = await conn.run_sync(sync_inspect)
+                if existing_tables:
+                    self.robot_logger.info('База данных уже инициализирована.')
+                    return True
+                self.robot_logger.info("База данных не найдена. Создаем новую.")
+                return False
+
+    async def _ensure_all_tables_exist(self) -> None:
         """
         Проверяет наличие всех таблиц, определённых в модели, и создаёт отсутствующие.
         Также проверяет столбцы в существующих таблицах и добавляет недостающие.
         """
-        try:
-            inspector = inspect(self.engine)
-            existing_tables = set(inspector.get_table_names())
-            all_tables = set(AbstractTable.metadata.tables.keys())
+        async with self._db_lock:
+            try:
+                async with self.engine.connect() as conn:
+                    def get_tables_sync(connection):
+                        inspector = inspect(connection)
+                        return inspector.get_table_names()
+                    existing_tables = set(await conn.run_sync(get_tables_sync))
+                    all_tables = set(AbstractTable.metadata.tables.keys())
+                    await self._create_missing_tables(existing_tables, all_tables)
+                    await self._check_and_update_columns(conn, existing_tables)
+            except Exception as e:
+                self.robot_logger.error(f"Ошибка при проверке или создании таблиц и столбцов: {e}")
 
-            self._create_missing_tables(existing_tables, all_tables)
-
-            self._check_and_update_columns(inspector, existing_tables)
-
-        except Exception as e:
-            self.robot_logger.error(f"Ошибка при проверке или создании таблиц и столбцов: {e}")
-
-    def _create_missing_tables(self, existing_tables: set, all_tables: set) -> None:
+    async def _create_missing_tables(self, existing_tables: set, all_tables: set) -> None:
         """
         Создаёт отсутствующие таблицы на основе модели.
         """
@@ -58,33 +72,33 @@ class DatabaseRepository(IDatabaseRepository):
             return
 
         self.robot_logger.info(f"Отсутствующие таблицы: {missing_tables}. Создаём их...")
-        for table_name in missing_tables:
-            try:
-                table = AbstractTable.metadata.tables[table_name]
-                table.create(self.engine)
-                self.robot_logger.success(f"Таблица '{table_name}' успешно создана.")
-            except Exception as e:
-                self.robot_logger.error(f"Ошибка при создании таблицы '{table_name}': {e}")
+        async with self.engine.begin() as conn:
+            for table_name in missing_tables:
+                try:
+                    table = AbstractTable.metadata.tables[table_name]
+                    await conn.run_sync(table.create)
+                    self.robot_logger.success(f"Таблица '{table_name}' успешно создана.")
+                except Exception as e:
+                    self.robot_logger.error(f"Ошибка при создании таблицы '{table_name}': {e}")
 
-        self.robot_logger.success("Все отсутствующие таблицы успешно обработаны.")
-
-    def _check_and_update_columns(self, inspector, existing_tables: set) -> None:
+    async def _check_and_update_columns(self, conn: AsyncSession, existing_tables: set) -> None:
         """
         Проверяет существующие таблицы на наличие недостающих столбцов и добавляет их.
         """
         for table_name in existing_tables:
             try:
+                def get_columns_sync(connection: AsyncSession):
+                    inspector = inspect(connection)
+                    return inspector.get_columns(table_name)
+
                 table_metadata = AbstractTable.metadata.tables[table_name]
-
-                existing_columns = {col['name'] for col in inspector.get_columns(table_name)}
+                existing_columns = {col['name'] for col in await conn.run_sync(get_columns_sync)}
                 defined_columns = {col.name for col in table_metadata.columns}
-
-                self._add_missing_columns(table_name, table_metadata, existing_columns, defined_columns)
-
+                await self._add_missing_columns(conn, table_name, table_metadata, existing_columns, defined_columns)
             except Exception as e:
                 self.robot_logger.error(f"Ошибка при проверке столбцов таблицы '{table_name}': {e}")
 
-    def _add_missing_columns(self, table_name: str, table_metadata, existing_columns: set, defined_columns: set) -> None:
+    async def _add_missing_columns(self, table_name: str, table_metadata, existing_columns: set, defined_columns: set) -> None:
         """
         Добавляет недостающие столбцы в таблицу.
         """
@@ -110,21 +124,29 @@ class DatabaseRepository(IDatabaseRepository):
         }
 
         self.robot_logger.info(f"В таблице '{table_name}' отсутствуют столбцы: {missing_columns}. Добавляем их...")
-        with self.engine.connect() as conn:
+        async with self.engine.connect() as conn:
             for column_name in missing_columns:
                 try:
                     column = table_metadata.columns[column_name]
                     column_type = str(column.type)
                     column_type = sqlite_type_mapping.get(column_type.upper(), "TEXT")
                     alter_query = f'ALTER TABLE "{table_name}" ADD COLUMN "{str(column_name)}" {column_type}'
-                    conn.execute(text(alter_query))
+                    await conn.execute(text(alter_query))
                     self.robot_logger.success(f"Столбец '{column_name}' успешно добавлен в таблицу '{table_name}'.")
                 except Exception as e:
                     self.robot_logger.error(f"Ошибка при добавлении столбца '{column_name}' в таблицу '{table_name}': {e}")
+            await conn.commit()
 
+    async def get_all_tables(self) -> List[str]:
+        """Возвращает список всех таблиц в базе данных."""
+        async with self._db_lock:
+            async with self.engine.connect() as conn:
+                def get_tables_sync(connection):
+                    inspector = inspect(connection)
+                    return inspector.get_table_names()
 
-    def get_all_tables(self) -> list[str]:
-        return list(AbstractTable.metadata.tables.keys())[1:]
+                tables = await conn.run_sync(get_tables_sync)
+            return tables[1:] if tables else []
 
     def _get_model_class_by_table_name(self, table_name: str) -> Optional[type[DeclarativeMeta]]:
         """Получить ORM-класс по имени таблицы, используя рефлексию SQLAlchemy."""
@@ -133,27 +155,24 @@ class DatabaseRepository(IDatabaseRepository):
                 return cls
         return None
 
-    def update_table(self, event) -> None:
-        file_path = Path(event.src_path)
-        table = AbstractTable.metadata.tables.get(file_path.parent.name)
-        data = self._get_data_exl(table, file_path)
-        self.robot_logger.info(f'Начинаем обновление {table.name}')
-        if data:
-            with self.session.begin() as session:
-                session.execute(delete(table))
-                self._insert_data(session, table, data)
-                self._update_metadata(session, file_path)
-
-    def _create_all_tables(self) -> None:
-        AbstractTable.metadata.create_all(bind=self.engine)
-        self.robot_logger.success("Таблицы успешно созданы или уже существуют.")
-
-    def _column_validate(self, obj: Table, columns: list[str]) -> bool:
-        """Check if the specified columns exist in the object."""
-        obj_column = [column.name for column in obj.columns[:-1]]
-        return set(obj_column).issubset(columns)
+    async def update_table(self, event) -> None:
+        """Обновляет таблицу данными из файла."""
+        async with self._db_lock:
+            self.robot_logger.info("Обновление БД заблокировано для чтения")
+            file_path = Path(event.src_path)
+            table = AbstractTable.metadata.tables.get(file_path.parent.name)
+            data = self._get_data_exl(table, file_path)
+            self.robot_logger.info(f'Начинаем обновление {table.name}')
+            if data:
+                async with self.session_factory() as session:
+                    async with session.begin():
+                        await session.execute(delete(table))
+                        await self._insert_data(session, table, data)
+                        await self._update_metadata(session, file_path)
+            self.robot_logger.success("Обновление БД завершено, разблокировано")
 
     def _get_data_exl(self, obj: Table, path: Path):
+        """Читает данные из Excel-файла."""
         try:
             col_lower = pd.read_excel(path, nrows=0).columns.tolist()
             col_upper = [str(col).upper() for col in col_lower]
@@ -165,17 +184,18 @@ class DatabaseRepository(IDatabaseRepository):
                 self.robot_logger.error(f'Book: {col_upper} Table: {obj.columns[:-1]}')
         except Exception as e:
             self.robot_logger.error(f'Ошибка чтения файла для загрузки в БД {e}')
+        return None
 
-    def _insert_data(self, session: Session, table: Table, data: list[dict]):
-        """insert_data."""
+    async def _insert_data(self, session: AsyncSession, table: Table, data: list[dict]):
+        """Вставляет данные в таблицу."""
         for item in data:
             obj_table = self._obj_create(table, item)
             if obj_table:
                 try:
                     session.add(obj_table)
-                    session.flush()
+                    await session.flush()
                 except Exception as e:
-                    session.rollback()
+                    await session.rollback()
                     self.robot_logger.error(f'Не удалось добавить объект в {table.name} {obj_table}')
                     self.robot_logger.error(f'{e}')
                     continue
@@ -192,24 +212,23 @@ class DatabaseRepository(IDatabaseRepository):
                     value = item[attr_name]
                     if not attr.columns[0].nullable:
                         if not isinstance(value, str) or not value:
-                            return
-                        if table.name == 'Запасные Категории':
-                            value = EliminationFilter.filter(value)
-                        else:
-                            value = value.replace(' ', '').upper()
+                            return None
+                        normalize_part_number = self.part_number_filter.normalize_part_number(value)
+                        if not normalize_part_number:
+                            return None
                     setattr(obj_instance, attr.key, value)
             return obj_instance
         except Exception as e:
             self.robot_logger.error(f'Ошибка создания объекта для БД {e}')
-            return
+            return None
 
-    def _update_metadata(self, session: Session, file_path: Path, status: str = 'updated') -> None:
-
+    async def _update_metadata(self, session: AsyncSession, file_path: Path, status: str = 'updated') -> None:
+        """Обновляет метаданные файла."""
         filename = file_path.name
         last_modified = datetime.fromtimestamp(file_path.stat().st_mtime)
         model_type = file_path.parent.name
         try:
-            metadata = session.query(FileMetadata).filter_by(model_type=model_type).first()
+            metadata = await session.get(FileMetadata, model_type)
             if metadata:
                 metadata.file_path = str(file_path)
                 metadata.last_modified = last_modified
@@ -228,3 +247,16 @@ class DatabaseRepository(IDatabaseRepository):
             self.robot_logger.success(f'{metadata}')
         except Exception as e:
             self.robot_logger.error(f"Ошибка при обновлении метаданных файла: {e}")
+
+    async def _create_all_tables(self) -> None:
+        """Создает все таблицы, определенные в модели."""
+        async with self._db_lock:
+            async with self.engine.connect() as conn:
+                await conn.run_sync(AbstractTable.metadata.create_all)
+                await conn.commit()
+            self.robot_logger.success("Таблицы успешно созданы или уже существуют.")
+
+    def _column_validate(self, obj: Table, columns: list[str]) -> bool:
+        """Проверяет, существуют ли указанные столбцы в объекте."""
+        obj_column = [column.name for column in obj.columns[:-1]]
+        return set(obj_column).issubset(columns)

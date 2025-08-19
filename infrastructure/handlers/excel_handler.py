@@ -90,6 +90,9 @@ class ExcelHandler(IExcelHandler):
 
         for key, formula in self._formules.items():
             if key in columns:
+                if key == "СТОИМОСТЬ ДОСТАВКИ/USD":
+                    if "СТОИМОСТЬ ДОСТАВКИ/USD" in data:
+                        continue
                 col = columns[key]
                 formula_with_row = formula.format(row=row)
                 ws_calculation.cell(row=row, column=col, value=formula_with_row)

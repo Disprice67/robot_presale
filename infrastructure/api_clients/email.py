@@ -10,7 +10,7 @@ from core import IRobotLogger
 class Email(IEmail):
     def __init__(self, settings_outlook: Outlook, buffer_in: Path, robot_logger: IRobotLogger):
         self.recipients = settings_outlook.recipients.split(', ')
-        self.original_recipients = self.recipients.copy()
+        self.sender = None
         self.buffer_in = buffer_in
         self.file_list: list[Path] = []
         self.subject: Optional[str] = None
@@ -35,20 +35,12 @@ class Email(IEmail):
     def clear_file_list(self) -> None:
         self.file_list.clear()
 
-    def remove_sender_email(self) -> None:
-        if self.sender in self.recipients:
-            self.recipients.remove(self.sender)
-            self.recipients = self.original_recipients.copy()
-
     def download_attachments(self,) -> bool:
         """Сохраняет вложения из входящих писем в указанный каталог."""
         try:
             for item in self.account.inbox.all():
                 self.sender = item.sender.email_address
                 self.subject = item.subject
-
-                if self.sender not in self.recipients:
-                    self.recipients.append(self.sender)
 
                 for attachment in item.attachments:
                     if attachment.name[attachment.name.rfind('.') - 1] in ('D', 'Y'):
@@ -87,13 +79,13 @@ class Email(IEmail):
         """
         try:
             to_recipients = [Mailbox(email_address=recipient) for recipient in self.recipients]
-            # Create message
+            if self.sender:
+                to_recipients.append(Mailbox(email_address=self.sender))
             m = Message(account=self.account,
                         folder=self.account.sent,
                         subject=self.subject,
                         body=f'Обработана страница << {sheet_name} >>.',
                         to_recipients=to_recipients)
-            # attach files
             if attachments:
                 with open(attachments, 'rb') as f:
                     attachment_content = f.read()
@@ -103,3 +95,5 @@ class Email(IEmail):
             attachments.unlink()
         except Exception as e:
             self.robot_logger.error(f'Ошибка при отправке письма {e}')
+        finally:
+            self.sender = None

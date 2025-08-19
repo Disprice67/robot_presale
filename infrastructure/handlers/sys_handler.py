@@ -1,8 +1,8 @@
-from apscheduler.schedulers.background import BackgroundScheduler
 from ..api_clients.sys import ParsingSYS
 from ..database.orm.models import Agreements
 from pathlib import Path
 from core import ISYSHandler, IRobotLogger
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 
 class SYSHandler(ISYSHandler):
@@ -13,21 +13,26 @@ class SYSHandler(ISYSHandler):
         self._base_dir = base_dir
         self.robot_logger = robot_logger
 
-    def _sheduler_update_sys(self, sys_dir: Path) -> None:
-        self.parsing_sys.parsing_active(sys_dir)
-        self.robot_logger.success('Договора из суса обновлены.')
+    async def _scheduler_update_sys(self, sys_dir: Path) -> None:
+        """Асинхронное обновление SUS."""
+        self.robot_logger.debug("Начало обновления SUS")
+        await self.parsing_sys.parsing_active(sys_dir)
+        self.robot_logger.debug("Обновление SUS завершено")
 
-    def start_monitoring(self) -> bool:
+    async def start_monitoring(self) -> bool:
+        """Запуск асинхронного мониторинга SUS с интервалом 3 дня."""
         try:
             fulldir = self._base_dir / self._agreement_dir
-            scheduler = BackgroundScheduler()
+            scheduler = AsyncIOScheduler()
             scheduler.add_job(
-                lambda: self._sheduler_update_sys(fulldir),
+                self._scheduler_update_sys,
                 'interval',
-                days=1
+                minutes=1,  # Обновление каждые 3 дня
+                args=[fulldir]
             )
             scheduler.start()
+            self.robot_logger.success("Мониторинг SUS запущен")
             return True
         except Exception as e:
-            self.robot_logger.error(f"Ошибка при запуске мониторинга СУСА: {e}")
+            self.robot_logger.error(f"Ошибка при запуске мониторинга СУС: {e}")
             return False

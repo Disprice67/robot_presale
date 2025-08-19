@@ -1,6 +1,7 @@
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Union
 from sqlalchemy.orm import as_declarative, mapped_column, declared_attr, Mapped
 from datetime import datetime
+from sqlalchemy import Boolean
 
 
 intpk = Annotated[int, mapped_column(autoincrement=True, primary_key=True)]
@@ -147,3 +148,18 @@ class AgreementsCollision(AbstractTable):
 
     def __repr__(self) -> str:
         return (f'AgreementsCollisions(project_code_collision={self.project_code_collision}')
+
+
+class ExceptionsStatus(AbstractTable):
+    """Параметры исключений в системе"""
+    ebay: Mapped[bool] = mapped_column(Boolean, default=False)
+    sys: Mapped[bool] = mapped_column(Boolean, default=False)
+    outlook: Mapped[bool] = mapped_column(Boolean, default=False)
+    huawei: Mapped[bool] = mapped_column(Boolean, default=False)
+    excel_handler: Mapped[bool] = mapped_column(Boolean, default=False)
+    file_handler: Mapped[bool] = mapped_column(Boolean, default=False)
+    sys_handler: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    def __repr__(self) -> str:
+        return (f"ExceptionsStatus(ebay={self.ebay}, sys={self.sys}, outlook={self.outlook}, huawei={self.huawei}, "
+                f"excel_handler={self.excel_handler}, file_handler={self.file_handler}, sys_handler={self.sys_handler})")

@@ -14,26 +14,23 @@ from .models import (Status,
 
 from sqlalchemy.ext.declarative import DeclarativeMeta
 from infrastructure.database.settings.db_settings import SQLAlchemySettings
-from core import IORMQuary, EliminationFilter, IRobotLogger
-from typing import Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from core import IORMQuary, IPartNumberFilter, IRobotLogger
+from typing import Optional, Any
 
 
 class AbstractQuaryORM:
     @staticmethod
-    def search_by_part_number(quary: Query, obj_table: DeclarativeMeta, part_number: str, session: Session) -> Optional[dict[str, any]]:
-        """
-        Выполняет поиск по точному, неполному и обратному соответствию.
-        :param query: SQLAlchemy Query объект.
-        :param obj_table: Таблица или модель SQLAlchemy для поиска.
-        :param part_number: Строка для поиска.
-        :param session: Активная сессия SQLAlchemy.
-        :return: Результат в виде словаря или None, если ничего не найдено.
-        """
-        quary_exact = quary.filter(part_number == obj_table.part_number)
-        quary_exact = quary_exact.add_columns(
+    async def search_by_part_number(query, obj_table: DeclarativeMeta, part_number: str,
+                                   session: AsyncSession, part_number_filter: IPartNumberFilter) -> Optional[dict]:
+        normalized_column = func.upper(
+            func.regexp_replace(obj_table.part_number, r'[^A-Za-zА-Яа-я0-9]', '')
+        )
+        query_exact = query.filter(part_number == normalized_column)
+        query_exact = query_exact.add_columns(
             case(
                 (
-                    part_number == obj_table.part_number,
+                    part_number == normalized_column,
                     case(
                         (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
                         else_=obj_table.part_number
@@ -42,15 +39,15 @@ class AbstractQuaryORM:
                 else_=None
             ).label('ЗИП')
         )
-        result = session.execute(quary_exact).first()
+        result = (await session.execute(query_exact)).first()
         if result:
             return result._asdict()
 
-        quary_in = quary.filter(obj_table.part_number.like(f"%{part_number}%"))
-        quary_in = quary_in.add_columns(
+        query_in = query.filter(normalized_column.like(f"%{part_number}%"))
+        query_in = query_in.add_columns(
             case(
                 (
-                    obj_table.part_number.like(f"%{part_number}%"),
+                    normalized_column.like(f"%{part_number}%"),
                     case(
                         (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
                         else_=obj_table.part_number
@@ -59,17 +56,17 @@ class AbstractQuaryORM:
                 else_=None
             ).label('ЗИП')
         )
-        result = session.execute(quary_in).first()
+        result = (await session.execute(query_in)).first()
         if result:
             result_dict = result._asdict()
             result_dict['MATCH_TYPE'] = {'ЗИП': True}
             return result_dict
 
-        quary_out = quary.filter(func.instr(part_number, obj_table.part_number))
-        quary_out = quary_out.add_columns(
+        query_out = query.filter(func.instr(part_number, normalized_column))
+        query_out = query_out.add_columns(
             case(
                 (
-                    func.instr(part_number, obj_table.part_number) > 0,
+                    func.instr(part_number, normalized_column) > 0,
                     case(
                         (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
                         else_=obj_table.part_number
@@ -78,7 +75,7 @@ class AbstractQuaryORM:
                 else_=None
             ).label('ЗИП')
         )
-        result = session.execute(quary_out).first()
+        result = (await session.execute(query_out)).first()
         if result:
             result_dict = result._asdict()
             result_dict['MATCH_TYPE'] = {'ЗИП': True}
@@ -86,11 +83,10 @@ class AbstractQuaryORM:
         return None
 
     @staticmethod
-    def quaryes(quary, obj_table: DeclarativeMeta, keys: list[str], session: Session):
-        """Цикл по part_number для выполнения поиска"""
+    async def queries(query, obj_table: DeclarativeMeta, keys: list[str], session: AsyncSession, part_number_filter: IPartNumberFilter):
         for part_number in keys:
-            result = AbstractQuaryORM.search_by_part_number(
-                quary, obj_table, part_number, session
+            result = await AbstractQuaryORM.search_by_part_number(
+                query, obj_table, part_number, session, part_number_filter
             )
             if result:
                 return result
@@ -98,7 +94,7 @@ class AbstractQuaryORM:
 
 class CodeBookRepository(AbstractQuaryORM):
     @staticmethod
-    def get_items_by_keys(session: Session, keys: list[str]):
+    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter):
         c = aliased(CodeBook)
         a = aliased(Agreements)
         ac = aliased(AgreementsCollision)
@@ -121,13 +117,12 @@ class CodeBookRepository(AbstractQuaryORM):
             func.instr(c.appointment, a.project_code) > 0,
             a.project_code != ac.project_code_collision
         ).limit(1)
-        return AbstractQuaryORM.quaryes(query, c, keys, session)
-
+        return await AbstractQuaryORM.queries(query, c, keys, session, part_number_filter)
 
 
 class PurchaseWantRepository(AbstractQuaryORM):
     @staticmethod
-    def get_items_by_keys(session: Session, keys: list[str]):
+    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter):
         p = aliased(PurchaseWant)
         engineer_comments = case(
             (
@@ -147,12 +142,12 @@ class PurchaseWantRepository(AbstractQuaryORM):
         ).order_by(
             func.length(p.part_number).desc()
         ).group_by(p.part_number).limit(1)
-        return AbstractQuaryORM.quaryes(quary, p, keys, session)
+        return await AbstractQuaryORM.queries(quary, p, keys, session, part_number_filter)
 
 
 class PurchaseBuyRepository(AbstractQuaryORM):
     @staticmethod
-    def get_items_by_keys(session: Session, keys: list[str]):
+    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter):
         p = aliased(PurchaseBuy)
         a = aliased(Agreements)
         ac = aliased(AgreementsCollision)
@@ -172,12 +167,12 @@ class PurchaseBuyRepository(AbstractQuaryORM):
             func.instr(p.appointment, a.project_code) > 0,
             a.project_code != ac.project_code_collision
         ).limit(1)
-        return AbstractQuaryORM.quaryes(quary, p, keys, session)
+        return await AbstractQuaryORM.queries(quary, p, keys, session, part_number_filter)
 
 
 class ArchiveBookRepository(AbstractQuaryORM):
     @staticmethod
-    def get_items_by_keys(session: Session, keys: list[str]):
+    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter):
         a = aliased(ArchiveBook)
         s = aliased(Status)
         ac = aliased(AgreementsCollision)
@@ -203,10 +198,10 @@ class ArchiveBookRepository(AbstractQuaryORM):
             a.zip_values != '-',
             a.zip_values != '0',
         ).group_by(a.part_number).limit(1)
-        return AbstractQuaryORM.quaryes(quary, a, keys, session)
+        return await AbstractQuaryORM.queries(quary, a, keys, session, part_number_filter)
 
     @staticmethod
-    def select_qty(session: Session, key: str):
+    async def select_qty(session: AsyncSession, key: str):
         a = aliased(ArchiveBook)
         s = aliased(Status)
         quary = select(
@@ -221,14 +216,17 @@ class ArchiveBookRepository(AbstractQuaryORM):
         ).group_by(a.part_number)
 
         quarys = quary.filter(key == a.part_number)
-        result = session.execute(quarys).first()
+        result = (await session.execute(quarys)).first()
         if result:
             return result._asdict()
 
     @staticmethod
-    def select_category(session: Session, key: str):
+    async def select_category(session: AsyncSession, key: str):
         m = aliased(MainCategory)
         a = aliased(ArchiveBook)
+        normalized_column = func.upper(
+            func.regexp_replace(a.part_number, r'[^A-Za-zА-Яа-я0-9]', '')
+        )
         quary = select(
             a.category.label('КАТЕГОРИЯ'),
             m.time.label('ТРУДОЗАТРАТЫ'),
@@ -239,17 +237,63 @@ class ArchiveBookRepository(AbstractQuaryORM):
             m, a.category == m.category
         ).filter(
             a.category == m.category,
-            a.part_number == key
+            normalized_column == key
         ).group_by(a.part_number)
 
-        result = session.execute(quary).first()
+        result = (await session.execute(quary)).first()
         if result:
             return result._asdict()
+
+    @staticmethod
+    async def select_category_partial(session: AsyncSession, key: str, part_number_filter: IPartNumberFilter):
+        """
+        Ищет категорию по неполному совпадению парт-номера с фильтром по длине и ранжированием.
+        """
+        a = aliased(ArchiveBook)
+        m = aliased(MainCategory)
+
+        key_length = len(key)
+        min_length = int(key_length * 0.8)
+        max_length = int(key_length * 1.2)
+        normalized_column = func.upper(
+            func.regexp_replace(a.part_number, r'[^A-Za-zА-Яа-я0-9]', '')
+        )
+
+        partial_query = select(
+            a.category.label('КАТЕГОРИЯ'),
+            m.time.label('ТРУДОЗАТРАТЫ'),
+            m.repair.label('РЕМОНТ'),
+            a.part_number,
+            func.length(a.part_number).label('part_length')
+        ).select_from(a).join(
+            m, a.category == m.category
+        ).filter(
+            normalized_column.like(f'%{key}%'),
+            func.length(normalized_column).between(min_length, max_length),
+            a.category == m.category
+        ).order_by(
+            func.abs(func.length(a.part_number) - key_length)
+        ).limit(10)
+
+        partial_results = (await session.execute(partial_query)).fetchall()
+        if partial_results:
+            best_match = None
+            best_score = 0
+            for result in partial_results:
+                result_dict = result._asdict()
+                score = part_number_filter.calculate_similarity_score(key, result_dict['part_number'])
+                if score > best_score:
+                    best_score = score
+                    best_match = result_dict
+            if best_match and best_score >= 70:
+                return best_match
+
+        return None
 
 
 class CollisionRepository:
     @staticmethod
-    def get_items_by_keys(session: Session, comment: str):
+    async def get_items_by_keys(session: AsyncSession, comment: str):
         c = aliased(Collision)
         m = aliased(MainCategory)
         query = select(
@@ -262,16 +306,19 @@ class CollisionRepository:
         ).filter(
             m.category == c.category,
         ).limit(1)
-        result = session.execute(query).first()
+        result = (await session.execute(query)).first()
         if result:
             return result._asdict()
 
 
 class CategoryRepository:
     @staticmethod
-    def get_items_by_keys(session: Session, key: str):
+    async def get_items_by_keys(session: AsyncSession, key: str):
         m = aliased(MainCategory)
         s = aliased(SecondCategory)
+        normalized_column = func.upper(
+            func.regexp_replace(s.letters, r'[^A-Za-zА-Яа-я0-9]', '')
+        )
         quary = select(
             m.category.label('КАТЕГОРИЯ'),
             m.repair.label('РЕМОНТ'),
@@ -279,17 +326,20 @@ class CategoryRepository:
         ).join(
             s, m.category == s.category
         ).filter(
-            func.instr(EliminationFilter.filter(key), s.letters) == 1,
+            func.instr(key, normalized_column) == 1,
         ).order_by(func.length(s.letters).desc()).limit(1)
-        result = session.execute(quary).first()
+        result = (await session.execute(quary)).first()
         if result:
             return result._asdict()
 
 
 class ChassisRepository:
     @staticmethod
-    def get_items_by_keys(session: Session, key: str):
+    async def get_items_by_keys(session: AsyncSession, key: str):
         c = aliased(Chassis)
+        normalized_column = func.upper(
+            func.regexp_replace(c.part_number, r'[^A-Za-zА-Яа-я0-9]', '')
+        )
         quary = select(
             c.part_number,
             c.power_unit,
@@ -297,8 +347,8 @@ class ChassisRepository:
             c.comment
         ).select_from(
             c
-        ).filter(func.instr(c.part_number, key) == 1)
-        result = session.execute(quary).first()
+        ).filter(func.instr(normalized_column, key) == 1)
+        result = (await session.execute(quary)).first()
         if result:
             part_bp = result.power_unit
             part_fan = result.fan_unit
@@ -310,113 +360,128 @@ class ChassisRepository:
 
 
 class ORMQuary(IORMQuary):
-    def __init__(self, settings_aclhemy: SQLAlchemySettings, robot_logger: IRobotLogger):
-        self.session_factory = settings_aclhemy.session_factory
+    def __init__(self, settings_alchemy: SQLAlchemySettings, robot_logger: IRobotLogger, part_number_filter: IPartNumberFilter):
+        self.session_factory = settings_alchemy.session_factory
         self.robot_logger = robot_logger
+        self.part_number_filter = part_number_filter
 
-    def _execute_repository_query(self, query_func, *args, **kwargs):
-        """Обертка для выполнения запросов в репозиториях."""
+    async def _execute_repository_query(self, query_func, *args, **kwargs):
         try:
-            with self.session_factory() as session:
-                return query_func(session, *args, **kwargs)
+            async with self.session_factory() as session:
+                return await query_func(session, *args, **kwargs)
         except Exception as e:
             self.robot_logger.error(f"Ошибка выполнения запроса: {str(query_func)} {e}")
             return None
 
-    def directory_books_query(self, item: dict, keys: list) -> None:
-        """Основной процесс поиска данных и обновления элемента."""
-        self.robot_logger.debug(f'Процесс поиска по directory_books {keys}')
+    async def directory_books_query(self, item: dict, keys: list, normalized_comment: str) -> None:
+        """
+        Выполняет поиск данных по парт-номерам через различные репозитории и обновляет item.
+        Каждый источник обрабатывается отдельно, результаты логируются и добавляются в item.
+        """
+        self.robot_logger.debug(f"Процесс поиска по directory_books для ключей: {keys}")
 
-        quary_result = self._find_primary_data(keys)
-        if quary_result:
-            quary_result = self._merge_archive_data(quary_result, keys[0])
-        else:
-            quary_result = self._find_archive_data(keys)
+        primary_result = await self._find_primary_data(keys)
+        if primary_result:
+            self._log_and_update_item(item, primary_result)
 
-        quary_result = self._find_category_in_archive(quary_result, keys[0])
-        quary_result = self._merge_chassis_data(quary_result, keys[0])
+        archive_result = await self._find_archive_data(keys, True if primary_result else False)
+        if archive_result:
+            self._log_and_update_item(item, archive_result)
 
-        if quary_result:
-            self._log_and_update_item(item, quary_result)
+        category_result = await self._find_category(keys, normalized_comment)
+        if category_result:
+            self._log_and_update_item(item, category_result)
 
-    def _find_primary_data(self, keys: list):
-        """Поиск данных в основных репозиториях."""
+        chassis_result = await self._find_chassis_data(keys[0])
+        if chassis_result:
+            self._log_and_update_item(item, chassis_result)
+
+    async def _find_primary_data(self, keys: list):
         repositories = [
             CodeBookRepository.get_items_by_keys,
             PurchaseBuyRepository.get_items_by_keys,
             PurchaseWantRepository.get_items_by_keys
         ]
         for repo_method in repositories:
-            result = self._execute_repository_query(repo_method, keys)
+            result = await self._execute_repository_query(repo_method, keys, self.part_number_filter)
             if result:
+                self.robot_logger.debug(f"Найдены данные в {repo_method.__name__}: {result}")
                 return result
         return None
 
-    def _merge_archive_data(self, quary_result: dict, key: str) -> dict:
-        """Объединяет результаты с данными из архива."""
-        qty_result = self._execute_repository_query(ArchiveBookRepository.select_qty, key)
-        if qty_result:
-            quary_result.update(qty_result)
-        return quary_result
-
-    def _find_archive_data(self, keys: list):
-        """Поиск данных в архиве."""
-        return self._execute_repository_query(ArchiveBookRepository.get_items_by_keys, keys)
-
-    def _merge_chassis_data(self, quary_result: dict, key: str):
-        """Объединяет результаты с данными шасси."""
-        chassis_result = self._execute_repository_query(ChassisRepository.get_items_by_keys, key)
-        if chassis_result:
-            if quary_result:
-                quary_result.update(chassis_result)
-            else:
-                quary_result = chassis_result
-        return quary_result
-
-    def _find_category_in_archive(self, quary_result: dict, key: str):
-        """Поиск категорий в архиви."""
-        category_archive = self._execute_repository_query(ArchiveBookRepository.select_category, key)
-        if category_archive:
-            if quary_result:
-                quary_result.update(category_archive)
-            else:
-                quary_result = category_archive
-        return quary_result
-
-    def _log_and_update_item(self, item: dict, quary_result: dict):
-        """Логирует результаты и обновляет элемент."""
-        # Если нигде не нашли, в логи вообще не записываем ничего
-        zip_result = quary_result.get('ЗИП')
-        book_result = quary_result.get('ГДЕ НАШЛИ')
-        self.robot_logger.success(f'Нашли {zip_result} в {book_result}')
-        item.update(quary_result)
-
-    def category_query(self, item: dict, key: str, comment: str):
-        """Ищет категорию и обновляет данные в item."""
-        if 'КАТЕГОРИЯ' in item and item['КАТЕГОРИЯ']:
-            return
-
-        self.robot_logger.debug(f'Процесс поиска категории для ключа {key}')
-        quary_result = {}
-        if comment:
-            quary_result = self._execute_repository_query(
-                CollisionRepository.get_items_by_keys,
-                comment
+    async def _find_archive_data(self, keys: list[str], primary_result: bool) -> Optional[dict[str, Any]]:
+        """
+        Ищет данные в ArchiveBook и добавляет информацию о количестве (QTY).
+        """
+        if not primary_result:
+            archive_result = await self._execute_repository_query(
+                ArchiveBookRepository.get_items_by_keys, keys, self.part_number_filter
             )
-
-        if not quary_result:
-            quary_result = self._execute_repository_query(
-                CategoryRepository.get_items_by_keys,
-                key
-            )
-
-        if not quary_result:
-            quary_result = {
-                'РЕМОНТ': 6001,
-                'ТРУДОЗАТРАТЫ': 4,
-                'КАТЕГОРИЯ': 'EMPTY'
-            }
+            if archive_result:
+                self.robot_logger.debug(f"Найдены данные в ArchiveBook: {archive_result}")
+                return archive_result
         else:
-            quary_result['MATCH_TYPE'] = {'КАТЕГОРИЯ': True}
+            qty_result = await self._execute_repository_query(ArchiveBookRepository.select_qty, keys[0])
+            if qty_result:
+                self.robot_logger.debug(f"Найдены qty в ArchiveBook: {qty_result}")
+                return qty_result
+        return None
 
-        item.update(quary_result)
+    async def _find_chassis_data(self, key: str) -> Optional[dict[str, Any]]:
+        """
+        Ищет данные по шасси для указанного ключа.
+        """
+        return await self._execute_repository_query(ChassisRepository.get_items_by_keys, key)
+
+    async def _find_category(self, keys: list[str], normalized_comment: str) -> Optional[dict[str, Any]]:
+        """
+        Ищет категорию в ArchiveBook (точное или частичное совпадение) или по комментарию/ключу.
+        """
+        async with self.session_factory() as session:
+            for key in keys:
+                exact_result = await ArchiveBookRepository.select_category(session, key)
+                if exact_result:
+                    self.robot_logger.debug(f"Найдена категория (точное совпадение) для {key}: {exact_result}")
+                    return exact_result
+
+            for key in keys:
+                partial_result = await ArchiveBookRepository.select_category_partial(
+                    session, key, self.part_number_filter
+                )
+                if partial_result:
+                    self.robot_logger.debug(f"Найдена категория (частичное совпадение) для {key}: {partial_result}")
+                    return partial_result
+
+        if normalized_comment:
+            comment_result = await self._execute_repository_query(
+                CollisionRepository.get_items_by_keys, normalized_comment
+            )
+            if comment_result:
+                self.robot_logger.debug(f"Найдена категория по комментарию: {comment_result}")
+                return comment_result
+
+        key_result = await self._execute_repository_query(CategoryRepository.get_items_by_keys, keys[0])
+        if key_result:
+            key_result['MATCH_TYPE'] = {'КАТЕГОРИЯ': True}
+            self.robot_logger.debug(f"Найдена категория по ключу {keys[0]}: {key_result}")
+            return key_result
+
+        default_result = {
+            'РЕМОНТ': 6001,
+            'ТРУДОЗАТРАТЫ': 4,
+            'КАТЕГОРИЯ': 'EMPTY'
+        }
+        self.robot_logger.debug(f"Категория не найдена, используются значения по умолчанию: {default_result}")
+        return default_result
+
+    def _log_and_update_item(self, item: dict, query_result: dict) -> None:
+        """
+        Логирует найденные данные и обновляет item.
+        """
+        zip_result = query_result.get('ЗИП')
+        book_result = query_result.get('ГДЕ НАШЛИ', 'неизвестный источник')
+        category = query_result.get('КАТЕГОРИЯ')
+        if zip_result or category:
+            log_message = f"Нашли данные: ЗИП={zip_result}, Категория={category} в {book_result}"
+            self.robot_logger.success(log_message)
+        item.update(query_result)

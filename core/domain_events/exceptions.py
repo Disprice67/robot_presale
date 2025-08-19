@@ -3,7 +3,7 @@ from core.interfaces.i_logger import IRobotLogger
 
 
 class IParsing(Protocol):
-    def get_part_and_model(self, key: str) -> list[str]:
+    async def get_part_and_model(self, key: str) -> list[str]:
         ...
 
 
@@ -14,6 +14,7 @@ class ExceptionGenerator:
         self.exception = exception or {
             '24': '48',
             '48': '24',
+            '16': '32',
             'K7': ('K8', 'K9'),
             'K8': ('K7', 'K9'),
             'K9': ('K7', 'K8')
@@ -28,12 +29,12 @@ class ExceptionGenerator:
                 result.extend(part_num.replace(exc, r) for r in repl_values)
         return result
 
-    def generate_exceptions(self, item: dict, key: str, vendor: str) -> list[str]:
+    async def generate_exceptions(self, item: dict, key: str, vendor: str) -> list[str]:
         """Generate exception part numbers based on the provided key and vendor."""
         part_numbers = []
 
         if vendor.upper() == 'HUAWEI':
-            pars = self.parsing_instance.get_part_and_model(key)
+            pars = await self.parsing_instance.get_part_and_model(key)
             if pars:
                 item['MODEL/PN'] = ', '.join(pars)
         elif vendor.upper() == 'CISCO' and 'R-' in key:
