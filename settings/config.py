@@ -41,8 +41,8 @@ class HuaweiData(BaseModel):
 # SYS
 class SysData(BaseModel):
     url_sys_agreements: str
-    client_id: str
-    client_secret: str
+    username: str
+    password: str
 
 
 # Folders

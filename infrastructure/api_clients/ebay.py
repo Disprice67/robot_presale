@@ -4,7 +4,6 @@ from core import IEbay
 from settings.config import Ebay
 from core import IRobotLogger, IPartNumberFilter
 import base64
-import asyncio
 import json
 from datetime import datetime
 import os
@@ -123,9 +122,6 @@ class EbayCom(IEbay):
                     if search_count == 0:
                         self.robot_logger.info(f"По запросу {params['q']} ничего не найдено.")
                         return None
-
-                    # all_urls = [item.get("itemWebUrl", "") for item in items if item.get("itemWebUrl")]
-                    # await self._save_raw_urls(key, all_urls)
 
                     self.robot_logger.success(f"Найдено {search_count} позиций для {params['q']}.")
                     return items

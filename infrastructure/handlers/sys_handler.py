@@ -27,7 +27,7 @@ class SYSHandler(ISYSHandler):
             scheduler.add_job(
                 self._scheduler_update_sys,
                 'interval',
-                minutes=1,  # Обновление каждые 3 дня
+                days=3,
                 args=[fulldir]
             )
             scheduler.start()

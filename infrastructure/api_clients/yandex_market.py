@@ -7,7 +7,6 @@ import asyncio
 import json
 import os
 from datetime import datetime
-import random
 
 
 class YandexMarketParser:
@@ -148,14 +147,10 @@ class YandexMarketParser:
         self.robot_logger.info(f"Yandex Market: найдено {len(items)} товаров для {part_number}")
 
         results = []
-        # all_urls = []
         for block in items:
             parsed = self._parse_item_block(block, normalized_part_number, ifilter)
             if parsed:
                 results.append(parsed)
-        #         all_urls.append(parsed["url"])
-
-        # await self._save_raw_urls(part_number, all_urls)
 
         if not results:
             return None

@@ -1,10 +1,11 @@
 import aiohttp
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 from pathlib import Path
 from openpyxl import Workbook
 import pandas as pd
+from playwright.async_api import async_playwright
 from settings.config import SysData, HuaweiHeader
 from core import IRobotLogger
 from io import BytesIO
@@ -13,16 +14,15 @@ import base64
 
 class ParsingSYS:
     TAKE = 80
-    TOKEN_URL = "https://fs.croc.ru/adfs/oauth2/token"
+    LOGIN_URL = "https://awsservice.croc.ru/"
 
     def __init__(self, settings_sys: SysData, header: HuaweiHeader, robot_logger: IRobotLogger):
         self.url = settings_sys.url_sys_agreements
-        self.client_id = settings_sys.client_id
-        self.client_secret = settings_sys.client_secret
+        self.username = settings_sys.username
+        self.password = settings_sys.password
         self.robot_logger = robot_logger
         self.headers = {'User-Agent': header.user_agent}
         self.access_token = None
-        self.token_expires_at = None
         self.params = {
             "columns": [
                 {
@@ -342,72 +342,95 @@ class ParsingSYS:
         }
 
     async def _refresh_token(self) -> bool:
-        """Запрашивает новый access-токен через Client Credentials Flow асинхронно."""
-        try:
-            payload = {
-                "grant_type": "client_credentials",
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-                "scope": "openid"  # Уточните scope у администратора ADFS
-            }
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.TOKEN_URL,
-                    data=payload,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                    ssl=False
-                ) as response:
-                    response.raise_for_status()
-                    token_data = await response.json()
-                    print(token_data)
-                    self.access_token = token_data["access_token"]
-                    expires_in = token_data.get("expires_in", 3600)  # По умолчанию 1 час
-                    self.token_expires_at = datetime.now() + timedelta(seconds=expires_in)
-                    self.robot_logger.success("Новый токен получен.")
-                    return True
-        except aiohttp.ClientError as e:
-            self.robot_logger.critical(f"Ошибка получения токена: {e}")
-            return False
+        """Эмулирует вход через Playwright, ожидая авторизацию, и извлекает токен или cookies."""
+        async with async_playwright() as p:
+            try:
+                browser = await p.chromium.launch(
+                    headless=False,
+                    args=['--ignore-certificate-errors', '--incognito']
+                )
+                
+                context = await browser.new_context(
+                    ignore_https_errors=True,
+                    no_viewport=False,
+                    http_credentials={
+                        'username': self.username,
+                        'password': self.password
+                    }
+                )
+                
+                page = await context.new_page()
+
+                self.robot_logger.debug("Открываем страницу логина в режиме инкогнито")
+                await page.goto(self.LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
+
+                await asyncio.sleep(3)
+
+                current_url = page.url
+                self.robot_logger.debug(f"Текущий URL после аутентификации: {current_url}")
+
+                cookies = await context.cookies()
+                self.robot_logger.debug(f"Найденные cookies: {[c['name'] for c in cookies]}")
+                
+                for cookie in cookies:
+                    if cookie["name"] in ["ADFS.OIDC.Token"]:
+                        self.access_token = cookie["value"]
+                        self.robot_logger.success(f"Токен {cookie['name']} успешно извлечен")
+                        await browser.close()
+                        return True
+
+                self.robot_logger.error("Не удалось найти токен аутентификации")
+                await browser.close()
+                return False
+
+            except Exception as e:
+                self.robot_logger.critical(f"Ошибка при получении токена: {e}")
+                return False
 
     async def _check_token_status(self) -> bool:
-        """Проверяет статус токена и обновляет его, если необходимо."""
+        """Проверяет наличие токена и обновляет его, если необходимо."""
         if self.access_token:
-            self.robot_logger.debug("Токен валиден.")
+            self.robot_logger.debug("Токен валиден")
             return True
 
-        self.robot_logger.debug("Токен отсутствует или истек, обновляем.")
+        self.robot_logger.debug("Токен отсутствует, обновляем")
         return await self._refresh_token()
 
-    async def _get_headers(self) -> dict:
-        """Формирует заголовки с токеном."""
+    async def _get_cookies(self) -> dict:
+        """Формирует словарь cookies только с основным токеном."""
         if not await self._check_token_status():
-            self.robot_logger.critical("Не удалось получить валидный токен.")
+            self.robot_logger.critical("Не удалось получить валидный токен")
             raise ValueError("Токен недоступен")
-        return {
-            "Authorization": f"Bearer {self.access_token}",
-            "User-Agent": self.headers["User-Agent"],
-            "Content-Type": "application/json"
-        }
+        
+        return {"ADFS.OIDC.Token": self.access_token}
 
     async def _post(self, url: str) -> Optional[dict]:
-        """Отправляет асинхронный POST-запрос с OAuth2 Bearer-токеном."""
+        """Отправляет асинхронный POST-запрос только с основным токеном в cookies."""
         try:
-            headers = await self._get_headers()
+            headers = {
+                "User-Agent": self.headers["User-Agent"],
+                "Content-Type": "application/json"
+            }
+            
+            cookies = await self._get_cookies()
+            
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url=url,
                     headers=headers,
+                    cookies=cookies,
                     json=self.params,
                     ssl=False
                 ) as response:
                     response.raise_for_status()
                     return await response.json()
+                    
         except aiohttp.ClientError as e:
-            if e.status == 401:
-                self.robot_logger.debug("Токен недействителен, пытаемся обновить.")
-                self.access_token = None  # Сбрасываем токен
+            if getattr(e, 'status', None) == 401:
+                self.robot_logger.debug("Cookie недействителен, пытаемся обновить")
+                self.access_token = None
                 if await self._refresh_token():
-                    return await self._post(url)  # Повторяем запрос с новым токеном
+                    return await self._post(url)
             self.robot_logger.error(f"Ошибка при выполнении запроса: {e}")
             return None
 

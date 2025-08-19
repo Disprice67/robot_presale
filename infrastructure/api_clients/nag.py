@@ -2,7 +2,6 @@ from bs4 import BeautifulSoup
 import requests
 from typing import Optional, Union
 from core import IRobotLogger, IPartNumberFilter, IBouz
-import os
 
 
 class NagParser(IBouz):

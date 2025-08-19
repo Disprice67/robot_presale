@@ -7,8 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 class SQLAlchemySettings:
     def __init__(self, url_database: str):
         self.engine = create_async_engine(url_database, future=True, echo=False)
-        
-        # Регистрируем обработчик события подключения
+
         @event.listens_for(self.engine.sync_engine, 'connect')
         def register_functions(dbapi_connection, connection_record):
             dbapi_connection.create_function('regexp', 2, self.sqlite_regexp)

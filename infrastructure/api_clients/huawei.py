@@ -2,7 +2,6 @@ import aiohttp
 from typing import Optional
 from core import IParsingHuawei, IRobotLogger
 from settings.config import HuaweiData, HuaweiHeader
-import asyncio
 
 
 class ParsingHuawei(IParsingHuawei):

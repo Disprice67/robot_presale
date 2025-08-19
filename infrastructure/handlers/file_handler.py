@@ -14,7 +14,7 @@ class FileEventHandler(FileSystemEventHandler):
     def on_modified(self, event):
         path_name = Path(event.src_path)
         if not event.is_directory and path_name.name.endswith(('.xlsx',)) and '~$' not in path_name.name:
-            asyncio.create_task(self.database_repository.update_table(event))
+            asyncio.run(self.database_repository.update_table(event))
             self.robot_logger.info(f'Директория обновлена {event.src_path}')
 
 

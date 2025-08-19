@@ -1,5 +1,4 @@
 from exchangelib import DELEGATE, Account, Credentials, FileAttachment, Mailbox, Message
-import os
 from typing import Optional
 from core import IEmail
 from pathlib import Path

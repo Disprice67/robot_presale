@@ -213,16 +213,15 @@ class AppCoordinator:
                     item, normalized_part_number, vendor
                 )
 
-                async with self.database_repository._db_lock:
-                    self._robot_logger.debug(f"Захват lock для обработки item {part_number}")
-                    await self.orm_service.directory_books_query(item, exc_part_numbers, normalized_comment)
-                    self.data_service.costs_by_category(item)
-                    category = item.get('КАТЕГОРИЯ')
-                    if category not in ('LIC-1', 'SOFT-1', 'MSCL'):
-                        await self.external_search_service.search(
-                            item, part_number, vendor, self.data_service._part_number_filter
-                        )
-                    self._robot_logger.debug(f"Lock освобожден для item {part_number}")
+                self._robot_logger.debug(f"Захват lock для обработки item {part_number}")
+                await self.orm_service.directory_books_query(item, exc_part_numbers, normalized_comment)
+                self.data_service.costs_by_category(item)
+                category = item.get('КАТЕГОРИЯ')
+                if category not in ('LIC-1', 'SOFT-1', 'MSCL'):
+                    await self.external_search_service.search(
+                        item, part_number, vendor, self.data_service._part_number_filter
+                    )
+                self._robot_logger.debug(f"Lock освобожден для item {part_number}")
 
             except Exception as e:
                 self._robot_logger.error(f"Error processing item {item.get('P/N')}: {e}")
@@ -234,23 +233,22 @@ class AppCoordinator:
 
     async def _process_file(self, file_path: Path):
         """Обрабатываем один файл: извлекаем данные, записываем и отправляем email."""
-        async with self.database_repository._db_lock:
-            try:
-                _input_data = self._handle_excel(file_path)
-                if not _input_data:
-                    self._robot_logger.info(f"No data found in {file_path}")
-                    return False
-                _data_collection = await self._collection_data(_input_data)
-                for data in _data_collection:
-                    if self.excel_handler_service.write_to_excel(data, file_path.name):
-                        self.email_service.send_email(
-                            self.excel_handler_service.get_output_file(file_path.name),
-                            data['sheet_name']
-                        )
-                return True
-            except Exception as e:
-                self._robot_logger.error(f"Error processing file {file_path}: {e}")
+        try:
+            _input_data = self._handle_excel(file_path)
+            if not _input_data:
+                self._robot_logger.info(f"No data found in {file_path}")
                 return False
+            _data_collection = await self._collection_data(_input_data)
+            for data in _data_collection:
+                if self.excel_handler_service.write_to_excel(data, file_path.name):
+                    self.email_service.send_email(
+                        self.excel_handler_service.get_output_file(file_path.name),
+                        data['sheet_name']
+                    )
+            return True
+        except Exception as e:
+            self._robot_logger.error(f"Error processing file {file_path}: {e}")
+            return False
 
     async def _process_email_batch(self):
         """Обработка пакета email, включая загрузку и обработку файлов."""
