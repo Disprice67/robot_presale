@@ -1,10 +1,12 @@
 import logging
 import asyncio
-from core import IRobotLogger, IRedisClient
+from core import IRedisClient
 import colorlog
 import inspect
 from pathlib import Path
 import time
+import json
+from core import IRobotLogger
 
 
 class RobotLogger(IRobotLogger):
@@ -28,10 +30,9 @@ class RobotLogger(IRobotLogger):
         file_handler = logging.FileHandler(self.log_path, mode='w', encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
         file_handler.setFormatter(logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s",
+            "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s - %(message)s - %(extra)s",
             datefmt="%Y-%m-%d %H:%M:%S"
-            )
-        )
+        ))
         self._logger.addHandler(file_handler)
 
     def _add_console_handler(self):
@@ -39,7 +40,7 @@ class RobotLogger(IRobotLogger):
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.DEBUG)
         console_handler.setFormatter(colorlog.ColoredFormatter(
-            "%(asctime)s - %(levelname)s - %(message)s",
+            "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s - %(message)s - %(extra)s",
             datefmt="%Y-%m-%d %H:%M:%S",
             log_colors={
                 'DEBUG': 'cyan',
@@ -52,16 +53,17 @@ class RobotLogger(IRobotLogger):
         ))
         self._logger.addHandler(console_handler)
 
-    def _log_and_notify(self, level: str, message: str):
+    def _log_and_notify(self, level: str, message: str, extra: dict = None):
         """Записываем в лог и отправляем уведомление в Telegram, если уровень ошибки или критичный."""
         frame = inspect.stack()[2]
         caller_filename = Path(frame.filename).name
         caller_function = frame.function
         caller_line = frame.lineno
 
-        detailed_message = f"{caller_filename}:{caller_line} - {caller_function} - {message}"
+        extra_str = json.dumps(extra, ensure_ascii=False) if extra else ""
+        detailed_message = f"{caller_filename}:{caller_line} - {caller_function} - {message} {extra_str}"
 
-        getattr(self._logger, level)(detailed_message)
+        getattr(self._logger, level)(detailed_message, extra={'extra': extra_str})
 
     def clear_log_file(self):
         """Очистка содержимого лог-файла."""
@@ -77,8 +79,7 @@ class RobotLogger(IRobotLogger):
         """Отправляет уведомления в очередь."""
         message = {'type': type}
         if log_file:
-            message['log_file_path'] = log_file
-
+            message['log_file_path'] = str(self.log_path)
         if file_path:
             message['file_name'] = file_path.name
             if excel_file:
@@ -100,20 +101,20 @@ class RobotLogger(IRobotLogger):
         time.sleep(3)
         self.clear_log_file()
 
-    def success(self, message: str):
-        self._log_and_notify("success", message)
+    def success(self, message: str, extra: dict = None):
+        self._log_and_notify("success", message, extra)
 
-    def debug(self, message: str) -> None:
-        self._log_and_notify("debug", message)
+    def debug(self, message: str, extra: dict = None) -> None:
+        self._log_and_notify("debug", message, extra)
 
-    def info(self, message: str) -> None:
+    def info(self, message: str, extra: dict = None) -> None:
         """Логирование уровня INFO."""
-        self._log_and_notify("info", message)
+        self._log_and_notify("info", message, extra)
 
-    def error(self, message: str) -> None:
+    def error(self, message: str, extra: dict = None) -> None:
         """Логирование уровня ERROR."""
-        self._log_and_notify("error", message)
+        self._log_and_notify("error", message, extra)
 
-    def critical(self, message: str) -> None:
+    def critical(self, message: str, extra: dict = None) -> None:
         """Логирование уровня CRITICAL."""
-        self._log_and_notify("critical", message)
+        self._log_and_notify("critical", message, extra)

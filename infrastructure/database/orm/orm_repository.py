@@ -17,88 +17,171 @@ from infrastructure.database.settings.db_settings import SQLAlchemySettings
 from sqlalchemy.ext.asyncio import AsyncSession
 from core import IORMQuary, IPartNumberFilter, IRobotLogger
 from typing import Optional, Any
+import json
 
 
 class AbstractQuaryORM:
     @staticmethod
-    async def search_by_part_number(query, obj_table: DeclarativeMeta, part_number: str,
-                                   session: AsyncSession, part_number_filter: IPartNumberFilter) -> Optional[dict]:
-        normalized_column = func.upper(
-            func.regexp_replace(obj_table.part_number, r'[^A-Za-zА-Яа-я0-9]', '')
-        )
-        query_exact = query.filter(part_number == normalized_column)
-        query_exact = query_exact.add_columns(
-            case(
-                (
-                    part_number == normalized_column,
-                    case(
-                        (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
-                        else_=obj_table.part_number
-                    )
-                ),
-                else_=None
-            ).label('ЗИП')
-        )
-        result = (await session.execute(query_exact)).first()
-        if result:
-            return result._asdict()
+    def _build_zip_case(obj_table: DeclarativeMeta, condition) -> case:
+        """Создаёт case-выражение для столбца ЗИП."""
+        return case(
+            (
+                condition,
+                case(
+                    (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
+                    else_=obj_table.part_number
+                )
+            ),
+            else_=None
+        ).label('ЗИП')
 
-        query_in = query.filter(normalized_column.like(f"%{part_number}%"))
-        query_in = query_in.add_columns(
-            case(
-                (
-                    normalized_column.like(f"%{part_number}%"),
-                    case(
-                        (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
-                        else_=obj_table.part_number
-                    )
-                ),
-                else_=None
-            ).label('ЗИП')
+    @staticmethod
+    async def _execute_query(query, part_number: str, match_type: str, session: AsyncSession, logger: IRobotLogger) -> list[dict[str, Any]]:
+        """Выполняет запрос и логирует его."""
+        logger.debug(
+            f"Выполнение запроса {match_type}",
+            extra={"part_number": part_number, "sql": str(query)}
         )
-        result = (await session.execute(query_in)).first()
-        if result:
-            result_dict = result._asdict()
-            result_dict['MATCH_TYPE'] = {'ЗИП': True}
-            return result_dict
+        results = (await session.execute(query)).all()
+        result_dicts = [r._asdict() for r in results] if results else []
+        logger.info(
+            f"Результаты {match_type}",
+            extra={
+                "part_number": part_number,
+                "result_count": len(result_dicts),
+                "result_data": json.dumps(result_dicts, ensure_ascii=False)
+            }
+        )
+        return result_dicts
 
-        query_out = query.filter(func.instr(part_number, normalized_column))
-        query_out = query_out.add_columns(
-            case(
-                (
-                    func.instr(part_number, normalized_column) > 0,
-                    case(
-                        (obj_table._aliased_insp.mapper.class_ is ArchiveBook, getattr(obj_table, 'zip_values', None)),
-                        else_=obj_table.part_number
-                    )
-                ),
-                else_=None
-            ).label('ЗИП')
+    @staticmethod
+    async def _search_exact_match(query, obj_table: DeclarativeMeta, part_number: str, session: AsyncSession, logger: IRobotLogger, main_part_number: str) -> Optional[dict[str, Any]]:
+        """Поиск по точному совпадению."""
+        normalized_column = func.upper(func.regexp_replace(obj_table.part_number, r'[^A-Za-zА-Яа-я0-9]', ''))
+        query_exact = query.filter(part_number == normalized_column).add_columns(
+            obj_table.part_number,
+            AbstractQuaryORM._build_zip_case(obj_table, part_number == normalized_column)
         )
-        result = (await session.execute(query_out)).first()
-        if result:
-            result_dict = result._asdict()
-            result_dict['MATCH_TYPE'] = {'ЗИП': True}
-            return result_dict
+        results = await AbstractQuaryORM._execute_query(query_exact, part_number, "EXACT", session, logger)
+        if results:
+            if part_number != main_part_number:
+                results[0]['MATCH_TYPE'] = {'ЗИП': True}
+            return results[0]
         return None
 
     @staticmethod
-    async def queries(query, obj_table: DeclarativeMeta, keys: list[str], session: AsyncSession, part_number_filter: IPartNumberFilter):
+    async def _search_like_match(query, obj_table: DeclarativeMeta, part_number: str, session: AsyncSession, logger: IRobotLogger) -> Optional[dict[str, Any]]:
+        """Поиск по частичному вхождению (LIKE)."""
+        normalized_column = func.upper(func.regexp_replace(obj_table.part_number, r'[^A-Za-zА-Яа-я0-9]', ''))
+        query_in = query.filter(normalized_column.like(f"%{part_number}%"))
+        query_in = query_in.add_columns(
+            AbstractQuaryORM._build_zip_case(obj_table, normalized_column.like(f"%{part_number}%"))
+        )
+        results = await AbstractQuaryORM._execute_query(query_in, part_number, "LIKE", session, logger)
+        if results:
+            input_len = len(part_number)
+            best_result = min(
+                results,
+                key=lambda x: abs(len(x['part_number']) - input_len)
+            )
+            best_result['MATCH_TYPE'] = {'ЗИП': True}
+            logger.info(
+                f"Выбран лучший результат LIKE",
+                extra={
+                    "part_number": part_number,
+                    "length_diff": abs(len(best_result['part_number']) - input_len),
+                    "result_data": best_result
+                }
+            )
+            return best_result
+        return None
+
+    @staticmethod
+    async def _search_instr_match(query, obj_table: DeclarativeMeta, part_number: str, session: AsyncSession, logger: IRobotLogger) -> Optional[dict[str, Any]]:
+        """Поиск по обратному вхождению (INSTR)."""
+        normalized_column = func.upper(func.regexp_replace(obj_table.part_number, r'[^A-Za-zА-Яа-я0-9]', ''))
+        query_out = query.filter(func.instr(part_number, normalized_column))
+        query_out = query_out.add_columns(
+            AbstractQuaryORM._build_zip_case(obj_table, func.instr(part_number, normalized_column) > 0)
+        )
+        results = await AbstractQuaryORM._execute_query(query_out, part_number, "INSTR", session, logger)
+        if results:
+            input_len = len(part_number)
+            best_result = min(
+                results,
+                key=lambda x: abs(len(x['part_number']) - input_len)
+            )
+            best_result['MATCH_TYPE'] = {'ЗИП': True}
+            logger.info(
+                f"Выбран лучший результат INSTR",
+                extra={
+                    "part_number": part_number,
+                    "length_diff": abs(len(best_result['part_number']) - input_len),
+                    "result_data": best_result
+                }
+            )
+            return best_result
+        return None
+
+    @staticmethod
+    async def search_by_part_number(query, obj_table: DeclarativeMeta, part_number: str,
+                                   session: AsyncSession, part_number_filter: IPartNumberFilter, logger: IRobotLogger, main_part_number: str) -> Optional[dict[str, Any]]:
+        """Основной метод поиска по part_number с логированием."""
+        # 1. Точное совпадение
+        result = await AbstractQuaryORM._search_exact_match(query, obj_table, part_number, session, logger, main_part_number)
+        if result:
+            return result
+
+        # 2. Частичное вхождение (LIKE)
+        result = await AbstractQuaryORM._search_like_match(query, obj_table, part_number, session, logger)
+        if result:
+            return result
+
+        # 3. Обратное вхождение (INSTR)
+        result = await AbstractQuaryORM._search_instr_match(query, obj_table, part_number, session, logger)
+        if result:
+            return result
+
+        logger.debug(
+            f"Результатов не найдено",
+            extra={"part_number": part_number}
+        )
+        return None
+
+    @staticmethod
+    async def queries(query, obj_table: DeclarativeMeta, keys: list[str], session: AsyncSession, part_number_filter: IPartNumberFilter, logger: IRobotLogger) -> Optional[dict[str, Any]]:
+        """Обработка списка ключей с логированием."""
+        logger.debug(
+            f"Обработка ключей",
+            extra={"keys": keys}
+        )
+        main_part_number = keys[0]
+
         for part_number in keys:
             result = await AbstractQuaryORM.search_by_part_number(
-                query, obj_table, part_number, session, part_number_filter
+                query, obj_table, part_number, session, part_number_filter, logger, main_part_number
             )
             if result:
+                logger.info(
+                    f"Найден результат для ключа",
+                    extra={"part_number": part_number, "result_data": result}
+                )
                 return result
+        logger.debug(
+            f"Ни один ключ не дал результата",
+            extra={"keys": keys}
+        )
+        return None
 
 
 class CodeBookRepository(AbstractQuaryORM):
     @staticmethod
-    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter):
+    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter, robot_logger: IRobotLogger):
         c = aliased(CodeBook)
         a = aliased(Agreements)
         ac = aliased(AgreementsCollision)
         query = select(
+            c.part_number,
             c.appointment.label('НАЗНАЧЕНИЕ'),
             c.logical_accounting.label('СКЛАД'),
             func.max(c.cost_price).label('$, СТОИМОСТЬ ЗАКУПКИ ЗИП'),
@@ -111,18 +194,16 @@ class CodeBookRepository(AbstractQuaryORM):
             ac, a.project_code != ac.project_code_collision
         ).group_by(
             c.part_number
-        ).order_by(
-            func.length(c.part_number).desc()
         ).filter(
             func.instr(c.appointment, a.project_code) > 0,
             a.project_code != ac.project_code_collision
-        ).limit(1)
-        return await AbstractQuaryORM.queries(query, c, keys, session, part_number_filter)
+        )
+        return await AbstractQuaryORM.queries(query, c, keys, session, part_number_filter, robot_logger)
 
 
 class PurchaseWantRepository(AbstractQuaryORM):
     @staticmethod
-    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter):
+    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter, robot_logger: IRobotLogger):
         p = aliased(PurchaseWant)
         engineer_comments = case(
             (
@@ -133,32 +214,30 @@ class PurchaseWantRepository(AbstractQuaryORM):
             ).label('ДТК СЕРВИС (КОММЕНТАРИИ ИНЖЕНЕРОВ)')
 
         quary = select(
+            p.part_number,
             func.max(p.amount_of_purchase.label('$, СТОИМОСТЬ ЗАКУПКИ ЗИП')),
             p.shop.label('НАЗНАЧЕНИЕ'),
             literal('Закупка Хотим').label('ГДЕ НАШЛИ'),
             engineer_comments
         ).select_from(
             p
-        ).order_by(
-            func.length(p.part_number).desc()
-        ).group_by(p.part_number).limit(1)
-        return await AbstractQuaryORM.queries(quary, p, keys, session, part_number_filter)
+        ).group_by(p.part_number)
+        return await AbstractQuaryORM.queries(quary, p, keys, session, part_number_filter, robot_logger)
 
 
 class PurchaseBuyRepository(AbstractQuaryORM):
     @staticmethod
-    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter):
+    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter, robot_logger: IRobotLogger):
         p = aliased(PurchaseBuy)
         a = aliased(Agreements)
         ac = aliased(AgreementsCollision)
         quary = select(
+            p.part_number,
             p.client.label('ДТК СЕРВИС (КОММЕНТАРИИ ИНЖЕНЕРОВ)'),
             p.appointment.label('НАЗНАЧЕНИЕ'),
             literal('Закупка Закупаем').label('ГДЕ НАШЛИ')
         ).select_from(
             p
-        ).order_by(
-            func.length(p.part_number).desc()
         ).join(
             a, func.instr(p.appointment, a.project_code) > 0
         ).join(
@@ -166,17 +245,18 @@ class PurchaseBuyRepository(AbstractQuaryORM):
         ).filter(
             func.instr(p.appointment, a.project_code) > 0,
             a.project_code != ac.project_code_collision
-        ).limit(1)
-        return await AbstractQuaryORM.queries(quary, p, keys, session, part_number_filter)
+        )
+        return await AbstractQuaryORM.queries(quary, p, keys, session, part_number_filter, robot_logger)
 
 
 class ArchiveBookRepository(AbstractQuaryORM):
     @staticmethod
-    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter):
+    async def get_items_by_keys(session: AsyncSession, keys: list[str], part_number_filter: IPartNumberFilter, robot_logger: IRobotLogger):
         a = aliased(ArchiveBook)
         s = aliased(Status)
         ac = aliased(AgreementsCollision)
         quary = select(
+            a.part_number,
             a.cost_of_zip.label('$, СТОИМОСТЬ ЗАКУПКИ ЗИП'),
             a.dtk_service.label('ДТК Сервис (КОММЕНТАРИИ ИНЖЕНЕРОВ)'),
             a.appointment.label('НАЗНАЧЕНИЕ'),
@@ -189,16 +269,14 @@ class ArchiveBookRepository(AbstractQuaryORM):
             s, a.project_code == s.request_number
         ).join(
             ac, func.instr(a.appointment, ac.project_code_collision) == 0
-        ).order_by(
-            func.length(a.part_number).desc()
         ).filter(
             func.instr(a.appointment, ac.project_code_collision) == 0,
             s.status == 'отправлено',
             a.zip_values != None,
             a.zip_values != '-',
             a.zip_values != '0',
-        ).group_by(a.part_number).limit(1)
-        return await AbstractQuaryORM.queries(quary, a, keys, session, part_number_filter)
+        ).group_by(a.part_number)
+        return await AbstractQuaryORM.queries(quary, a, keys, session, part_number_filter, robot_logger)
 
     @staticmethod
     async def select_qty(session: AsyncSession, key: str):
@@ -403,7 +481,7 @@ class ORMQuary(IORMQuary):
             PurchaseWantRepository.get_items_by_keys
         ]
         for repo_method in repositories:
-            result = await self._execute_repository_query(repo_method, keys, self.part_number_filter)
+            result = await self._execute_repository_query(repo_method, keys, self.part_number_filter, self.robot_logger)
             if result:
                 self.robot_logger.debug(f"Найдены данные в {repo_method.__name__}: {result}")
                 return result
@@ -415,7 +493,7 @@ class ORMQuary(IORMQuary):
         """
         if not primary_result:
             archive_result = await self._execute_repository_query(
-                ArchiveBookRepository.get_items_by_keys, keys, self.part_number_filter
+                ArchiveBookRepository.get_items_by_keys, keys, self.part_number_filter, self.robot_logger
             )
             if archive_result:
                 self.robot_logger.debug(f"Найдены данные в ArchiveBook: {archive_result}")
